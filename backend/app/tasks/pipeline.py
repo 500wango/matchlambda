@@ -177,9 +177,19 @@ def hourly_pipeline_task():
 
 
 async def run_hourly_pipeline():
-    # 1. Train model if needed
+    # 1. Fetch live odds if provider configured
+    if settings.THE_ODDS_API_KEY:
+        from app.etl.odds_api import OddsApiClient
+        client = OddsApiClient()
+        events = await client.fetch_epl_odds(bookmakers="pinnacle", markets="h2h")
+        async with AsyncSessionLocal() as session:
+            for ev in events:
+                await client.ingest_odds_event(session, ev, target_bookmaker="pinnacle")
+
+    # 2. Train model with latest finished matches
     model_param = await run_model_training_async("EPL")
-    # 2. Refresh predictions for scheduled fixtures
+
+    # 3. Refresh predictions for scheduled fixtures
     async with AsyncSessionLocal() as session:
         stmt = select(Match.id).where(Match.status == "SCHEDULED")
         fixture_ids = (await session.execute(stmt)).scalars().all()

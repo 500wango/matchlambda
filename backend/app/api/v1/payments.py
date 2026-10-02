@@ -274,6 +274,52 @@ async def payments_webhook(
     if invoice.credited_at is not None:
         return {"status": "ok"}
 
+    # 4. Mandatory provider settlement verification (Section 3 of payment spec)
+    # Fetch referenced payment through GET /v1/payment/{payment_id}
+    api_key = settings.NOWPAYMENTS_API_KEY
+    if api_key and not (api_key == "sandbox_test_key" or api_key.startswith("test_")):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                pay_resp = await client.get(
+                    f"https://api.nowpayments.io/v1/payment/{payment_id}",
+                    headers={"x-api-key": api_key},
+                )
+                if pay_resp.status_code == 200:
+                    pay_info = pay_resp.json()
+                    prov_order_id = str(pay_info.get("order_id", ""))
+                    prov_status = str(pay_info.get("payment_status", "")).lower()
+                    prov_price_amount = Decimal(str(pay_info.get("price_amount", "0")))
+                    prov_price_curr = str(pay_info.get("price_currency", "")).lower()
+
+                    # Require matching order_id, price_currency=usd, price_amount
+                    if (
+                        prov_order_id != invoice.order_id
+                        or prov_price_curr != "usd"
+                        or prov_price_amount != invoice.amount_usd
+                    ):
+                        invoice.payment_status = "REVIEW"
+                        invoice.updated_at = datetime.now(timezone.utc)
+                        await db.commit()
+                        raise AppException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            code="PAYMENT_MISMATCH",
+                            message="Settlement verification failed: order or amount mismatch.",
+                        )
+                    # Use verified status from provider API
+                    payment_status = prov_status
+                else:
+                    raise AppException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        code="ORDER_RECONCILIATION_REQUIRED",
+                        message="Provider payment record fetch failed.",
+                    )
+        except httpx.RequestError:
+            raise AppException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                code="ORDER_RECONCILIATION_REQUIRED",
+                message="Provider API timeout during settlement verification.",
+            )
+
     now = datetime.now(timezone.utc)
 
     # 4. Only verified finished payment can be credited
