@@ -105,6 +105,11 @@ async def test_fixtures_access_and_filter():
         assert res.status_code == 403
         assert res.json()["error"]["code"] == "PASS_REQUIRED"
 
+        for endpoint in ("/v1/alpha/scanner", "/v1/analytics/backtest"):
+            res = await client.get(endpoint, headers={"Authorization": f"Bearer {token}"})
+            assert res.status_code == 403
+            assert res.json()["error"]["code"] == "PASS_REQUIRED"
+
 
 @pytest.mark.asyncio
 async def test_payment_and_analyst_entitlement():
@@ -274,5 +279,4 @@ async def test_daily_picks_and_parlays():
         if data_en["parlays"]:
             p0_en = data_en["parlays"][0]
             assert "Ticket" in p0_en["copy_text"] or "Parlay" in p0_en["copy_text"]
-
 

@@ -210,7 +210,7 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({ matchId, fixture, 
                 <div className="bg-[#090d16] rounded-xl border border-gray-800 p-5 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center">
-                      <Flame className="w-4 h-4 mr-1.5 text-blue-400" /> 1X2 胜平负泊松概率 vs Pinnacle 市场定价
+                      <Flame className="w-4 h-4 mr-1.5 text-blue-400" /> 1X2 胜平负模型概率与市场报价
                     </h4>
                     <span className="text-[11px] text-gray-400 font-mono">
                       Bookmaker: {data.comparison.bookmaker.toUpperCase()} (De-juice: {data.comparison.dejuice_method})

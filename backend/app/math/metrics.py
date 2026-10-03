@@ -2,14 +2,25 @@ import math
 from typing import List, Tuple, Dict, Any
 
 
+def _validate_inputs(predictions: List[Tuple[float, float, float]], actuals: List[str]) -> None:
+    if not predictions or len(predictions) != len(actuals):
+        raise ValueError("Predictions and actuals must have matching non-zero lengths.")
+    if any(act not in {"HOME", "DRAW", "AWAY"} for act in actuals):
+        raise ValueError("Unknown actual outcome.")
+    for probs in predictions:
+        if any(not math.isfinite(p) or p < 0.0 or p > 1.0 for p in probs):
+            raise ValueError("Probabilities must be finite and within [0, 1].")
+        if abs(sum(probs) - 1.0) > 1e-8:
+            raise ValueError("Probabilities must sum to 1.")
+
+
 def brier_score_multiclass(predictions: List[Tuple[float, float, float]], actuals: List[str]) -> float:
     """
     Multiclass Brier score: sum over three outcomes of squared probability error,
     averaged over matches.
     actuals: List of 'HOME', 'DRAW', or 'AWAY'
     """
-    if not predictions or len(predictions) != len(actuals):
-        raise ValueError("Predictions and actuals must have matching non-zero lengths.")
+    _validate_inputs(predictions, actuals)
 
     total_error = 0.0
     for (ph, pd, pa), act in zip(predictions, actuals):
@@ -27,8 +38,9 @@ def log_loss_multiclass(predictions: List[Tuple[float, float, float]], actuals: 
     """
     Multiclass log loss: mean negative log probability of realized outcome.
     """
-    if not predictions or len(predictions) != len(actuals):
-        raise ValueError("Predictions and actuals must have matching non-zero lengths.")
+    _validate_inputs(predictions, actuals)
+    if not math.isfinite(eps) or eps <= 0.0 or eps > 1.0:
+        raise ValueError("eps must be finite and in (0, 1].")
 
     total_loss = 0.0
     for (ph, pd, pa), act in zip(predictions, actuals):
@@ -38,8 +50,6 @@ def log_loss_multiclass(predictions: List[Tuple[float, float, float]], actuals: 
             p = max(eps, min(1.0, pd))
         elif act == "AWAY":
             p = max(eps, min(1.0, pa))
-        else:
-            raise ValueError(f"Unknown actual outcome: {act}")
         total_loss += -math.log(p)
 
     return total_loss / len(predictions)

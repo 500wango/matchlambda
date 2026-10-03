@@ -147,6 +147,24 @@ export const PricingModal: React.FC<PricingModalProps> = ({
           </div>
         )}
 
+        {/* Profit Guarantee Banner */}
+        <div className="mb-6 p-3.5 bg-emerald-500/10 border border-emerald-500/25 rounded-xl flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0">
+            <Shield className="w-4.5 h-4.5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-2">
+              <span>{isEn ? "100% Mathematical Profit Guarantee" : "100% 数学正期望保底承诺"}</span>
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-[10px] font-mono tracking-wider">PROMISE</span>
+            </h4>
+            <p className="text-[11px] text-gray-300 mt-0.5 leading-relaxed">
+              {isEn
+                ? "If your disciplined execution over the first 30 days does not yield positive returns, your next month is free. No questions asked."
+                : "若您首月严格遵照量化仓位纪律执行未实现资金正向增长，次月直接全免续期，直到盈利为止。"}
+            </p>
+          </div>
+        </div>
+
         {!activeOrder ? (
           <div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -171,13 +189,13 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                 </div>
                 <ul className="space-y-2 text-xs text-gray-300">
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "Full Dixon-Coles 1X2 Probabilities" : "五大联赛与全球联赛 1X2 泊松真实概率"}
+                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "Dixon-Coles 1X2 probability estimates" : "已支持赛事的 Dixon-Coles 1X2 概率估计"}
                   </li>
                   <li className="flex items-center">
                     <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "6×6 Score Distribution Matrix" : "6×6 详尽比分联合概率矩阵"}
                   </li>
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "Real-time +EV Alpha Scanner" : "实时 +EV 价值雷达与凯利仓位计算"}
+                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "Latest eligible +EV scanner signals and Kelly sizing" : "通过时效校验的 +EV 信号与凯利仓位计算"}
                   </li>
                   <li className="flex items-center">
                     <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "Multi-market Derivatives: Totals & BTTS" : "高阶衍生盘口：大小球、双进与亚盘让球"}
@@ -198,27 +216,27 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   {isEn ? "Best Value" : "推荐首选"}
                 </div>
                 <div className="flex justify-between items-center mb-2">
-                  <h4 className="font-bold text-white text-base">{isEn ? "Season Pass" : "季度赛季通行证"}</h4>
+                  <h4 className="font-bold text-white text-base">{isEn ? "Season Pass" : "赛季通行证"}</h4>
                   <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-500/20 text-amber-400">
-                    {isEn ? "90 Days" : "90 天"}
+                    {isEn ? "270 Days" : "270 天"}
                   </span>
                 </div>
                 <div className="flex items-baseline mb-4">
-                  <span className="text-3xl font-extrabold text-white">$69</span>
-                  <span className="text-xs text-gray-400 ml-1">{isEn ? "/ 3 months" : "/ 3 个月"}</span>
+                  <span className="text-3xl font-extrabold text-white">$149</span>
+                  <span className="text-xs text-gray-400 ml-1">{isEn ? "/ one-time" : "/ 一次性"}</span>
                 </div>
                 <ul className="space-y-2 text-xs text-gray-300">
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "All 17 Leagues Full Coverage (90d)" : "全部 17 大联赛无限覆盖 (90天)"}
+                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "Analyst features across supported leagues for 270 days" : "已支持联赛的 Analyst 功能，有效期 270 天"}
                   </li>
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "Unrestricted +EV Scanner & Staking" : "无限制实时 +EV 信号雷达与实时推送"}
+                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "Eligible +EV scanner with a 5% minimum EV" : "最低 5% EV 的有效信号与仓位计算"}
                   </li>
                   <li className="flex items-center">
                     <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "Smart Parlay 2-fold & 3-fold Generator" : "智能 2 串 1 / 3 串 1 方案一键生成"}
                   </li>
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "Monte Carlo Bankroll Simulation" : "蒙特卡洛 1000 路径资金回撤模拟"}
+                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "Hypothetical Monte Carlo scenarios" : "基于输入假设的蒙特卡洛情景模拟"}
                   </li>
                 </ul>
               </div>

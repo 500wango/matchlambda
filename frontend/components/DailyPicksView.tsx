@@ -579,9 +579,13 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                               <span className="text-base font-extrabold text-white">
                                 {pick.selection_name}
                               </span>
-                              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-xs">
-                                @{pick.market_odds.toFixed(2)}
-                              </span>
+                              {pick.market_odds == null ? (
+                                <span className="text-[10px] text-gray-400">{lang === "en" ? "Model estimate only" : "仅模型估计"}</span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-xs">
+                                  @{pick.market_odds.toFixed(2)}
+                                </span>
+                              )}
                             </div>
                           </div>
 

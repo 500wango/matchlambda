@@ -63,13 +63,11 @@ def compute_derived_markets(
             if h == 0:
                 p_away_clean_sheet += p
 
-    # Account for omitted tail mass (typically ~0.5% - 2%)
-    # Tail matches (scores > 5) are predominantly high-scoring (> 2.5, > 3.5, and BTTS)
+    # Any omitted score has at least six total goals, but its BTTS state is unknown.
     if omitted_mass > 0:
-        p_ou_1_5_over = min(0.999, p_ou_1_5_over + omitted_mass * 0.95)
-        p_ou_2_5_over = min(0.999, p_ou_2_5_over + omitted_mass * 0.90)
-        p_ou_3_5_over = min(0.999, p_ou_3_5_over + omitted_mass * 0.80)
-        p_btts_yes = min(0.999, p_btts_yes + omitted_mass * 0.75)
+        p_ou_1_5_over += omitted_mass
+        p_ou_2_5_over += omitted_mass
+        p_ou_3_5_over += omitted_mass
 
     p_ou_1_5_under = max(0.001, 1.0 - p_ou_1_5_over)
     p_ou_2_5_under = max(0.001, 1.0 - p_ou_2_5_over)
@@ -102,6 +100,7 @@ def compute_derived_markets(
         return round(1.0 / prob, 2)
 
     return {
+        "probability_error_bound": round(omitted_mass, 12),
         "expected_goals": {
             "home": round(lambda_home, 3),
             "away": round(mu_away, 3),

@@ -2,16 +2,14 @@ import asyncio
 import math
 import hashlib
 from datetime import datetime, timezone, timedelta
-from decimal import Decimal
 from typing import Optional, List, Dict, Any
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.celery import celery_app
 from app.models import League, Team, Match, OddsSnapshot, ModelParameter, Prediction
 from app.math.dixon_coles import fit_dixon_coles, calculate_match_distribution
-from app.math.shin import calculate_shin_probabilities
-from app.math.ev import calculate_ev, calculate_half_kelly, has_value_signal
+from app.math.freshness import latest_eligible_quote
 
 
 async def run_model_training_async(league_id: str = "EPL") -> ModelParameter:
@@ -43,7 +41,10 @@ async def run_model_training_async(league_id: str = "EPL") -> ModelParameter:
         all_teams = sorted(list(team_set))
 
         match_tuples = [
-            (m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.match_date)
+            (
+                m.home_team_id, m.away_team_id, m.home_score, m.away_score,
+                m.match_date, m.result_available_at,
+            )
             for m in matches
         ]
 
@@ -88,6 +89,8 @@ async def generate_snapshots_and_predictions_async(match_id: str, model_param_id
 
         now = datetime.now(timezone.utc)
         as_of = now
+        if match.match_date <= as_of:
+            return
 
         # Get latest model parameters
         if model_param_id:
@@ -103,33 +106,18 @@ async def generate_snapshots_and_predictions_async(match_id: str, model_param_id
         if not model_param:
             return
 
-        # 1. Provide an eligible odds snapshot if not already present
-        # In a real environment, this pulls from The Odds API for match.sources
-        # We ensure a realistic Pinnacle quote snapshot is recorded
-        quote_time = as_of - timedelta(seconds=30)
-        odds_h = Decimal("1.900000")
-        odds_d = Decimal("3.750000")
-        odds_a = Decimal("4.500000")
-
-        # De-juice via Shin
-        probs, z, method = calculate_shin_probabilities([float(odds_h), float(odds_d), float(odds_a)])
-
-        odds_snap = OddsSnapshot(
-            match_id=match_id,
-            source_name="the_odds_api",
-            bookmaker="pinnacle",
-            quote_at=quote_time,
-            recorded_at=as_of,
-            home_odds=odds_h,
-            draw_odds=odds_d,
-            away_odds=odds_a,
-            dejuice_method=method,
-            implied_prob_home=probs[0],
-            implied_prob_draw=probs[1],
-            implied_prob_away=probs[2],
+        quote_stmt = (
+            select(OddsSnapshot)
+            .where(
+                OddsSnapshot.match_id == match_id,
+                OddsSnapshot.quote_at >= as_of - timedelta(hours=13),
+                OddsSnapshot.quote_at <= as_of,
+                OddsSnapshot.recorded_at <= as_of,
+            )
+            .order_by(OddsSnapshot.quote_at.desc())
         )
-        session.add(odds_snap)
-        await session.flush()
+        quote_rows = (await session.execute(quote_stmt)).scalars().all()
+        odds_snap = latest_eligible_quote(quote_rows, as_of)
 
         # 2. Compute lambda_home and mu_away from model_param
         home_att = model_param.team_attack.get(match.home_team_id, 0.0)
@@ -154,7 +142,7 @@ async def generate_snapshots_and_predictions_async(match_id: str, model_param_id
         pred = Prediction(
             match_id=match_id,
             model_parameters_id=model_param.id,
-            odds_snapshot_id=odds_snap.id,
+            odds_snapshot_id=odds_snap.id if odds_snap else None,
             as_of=as_of,
             kickoff_at_prediction=match.match_date,
             generated_at=now,

@@ -19,6 +19,7 @@ from app.schemas.analysis import (
 )
 from app.api.deps import get_current_user_optional, require_analyst_user, is_active_analyst
 from app.math.ev import calculate_ev, calculate_half_kelly, has_value_signal
+from app.math.freshness import is_placeholder_quote, latest_eligible_quote
 
 router = APIRouter(prefix="/matches", tags=["Matches"])
 
@@ -116,6 +117,24 @@ def evaluate_fixture_analysis(
             "has_value": False,
         }
 
+    if pred.as_of > now or pred.generated_at > now:
+        return {
+            "data_status": "STALE",
+            "reason": "FUTURE_PREDICTION",
+            "prediction": pred,
+            "comparison": None,
+            "has_value": False,
+        }
+
+    if pred.model_parameters and pred.model_parameters.training_cutoff > pred.as_of:
+        return {
+            "data_status": "STALE",
+            "reason": "FUTURE_TRAINING_CUTOFF",
+            "prediction": pred,
+            "comparison": None,
+            "has_value": False,
+        }
+
     pred_age = (now - pred.as_of).total_seconds() / 3600.0
     if pred_age > 13.0:
         return {
@@ -131,6 +150,15 @@ def evaluate_fixture_analysis(
         return {
             "data_status": "AVAILABLE",
             "reason": "MISSING_QUOTE",
+            "prediction": pred,
+            "comparison": None,
+            "has_value": False,
+        }
+
+    if is_placeholder_quote(odds):
+        return {
+            "data_status": "AVAILABLE",
+            "reason": "PLACEHOLDER_QUOTE",
             "prediction": pred,
             "comparison": None,
             "has_value": False,
@@ -228,6 +256,7 @@ async def get_fixtures(
         .options(
             selectinload(Match.home_team),
             selectinload(Match.away_team),
+            selectinload(Match.odds_snapshots),
             selectinload(Match.predictions).selectinload(Prediction.odds_snapshot),
             selectinload(Match.predictions).selectinload(Prediction.model_parameters),
         )
@@ -253,7 +282,13 @@ async def get_fixtures(
         if m.predictions:
             latest_pred = max(m.predictions, key=lambda p: p.as_of)
 
-        odds_snap = latest_pred.odds_snapshot if latest_pred else None
+        odds_snap = None
+        if latest_pred:
+            match_quotes = [
+                quote for quote in m.odds_snapshots
+                if quote.quote_at <= latest_pred.as_of
+            ]
+            odds_snap = latest_eligible_quote(match_quotes, latest_pred.as_of)
 
         eval_res = evaluate_fixture_analysis(m, latest_pred, odds_snap, now)
 
@@ -347,7 +382,19 @@ async def get_match_analysis(
     if match.predictions:
         latest_pred = max(match.predictions, key=lambda p: p.as_of)
 
-    odds_snap = latest_pred.odds_snapshot if latest_pred else None
+    odds_snap = None
+    if latest_pred:
+        quote_stmt = (
+            select(OddsSnapshot)
+            .where(
+                OddsSnapshot.match_id == match_id,
+                OddsSnapshot.quote_at <= latest_pred.as_of,
+                OddsSnapshot.recorded_at <= latest_pred.as_of,
+            )
+            .order_by(OddsSnapshot.quote_at.desc())
+        )
+        odds_rows = (await db.execute(quote_stmt)).scalars().all()
+        odds_snap = latest_eligible_quote(odds_rows, latest_pred.as_of)
     eval_res = evaluate_fixture_analysis(match, latest_pred, odds_snap, now)
 
     pred_detail = None

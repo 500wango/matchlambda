@@ -1,9 +1,10 @@
 import math
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any
 import numpy as np
 from scipy.optimize import minimize
 from scipy.special import gammaln
+from scipy.stats import poisson
 
 
 def tau(x: int, y: int, lambda_: float, mu: float, rho: float) -> float:
@@ -71,15 +72,18 @@ def calculate_match_distribution(
     # 1. Expand support K >= 5 until omitted joint mass <= 1e-10
     K = 5
     while True:
-        # Compute marginal Poisson tails: P(X > K) and P(Y > K)
-        # Using cumulative Poisson or direct sum
-        tail_x = 1.0 - sum(math.exp(pois_logpmf(x, lambda_home)) for x in range(K + 1))
-        tail_y = 1.0 - sum(math.exp(pois_logpmf(y, mu_away)) for y in range(K + 1))
+        # Use survival functions to avoid cancellation when lambda is large.
+        tail_x = float(poisson.sf(K, lambda_home))
+        tail_y = float(poisson.sf(K, mu_away))
         # Dixon-Coles corrections only affect {0,1}x{0,1}, which sum to zero.
         # For K >= 1, the omitted tail mass <= tail_x + tail_y
         omitted_bound = max(0.0, tail_x) + max(0.0, tail_y)
-        if omitted_bound <= 1e-10 or K >= 30:
+        if omitted_bound <= 1e-10:
             break
+        if K >= 100:
+            raise ValueError(
+                f"Calculation support did not reach omitted mass <= 1e-10: K={K}, bound={omitted_bound}"
+            )
         K += 1
 
     # Compute unnormalized joint distribution P(x, y) over 0..K
@@ -91,7 +95,11 @@ def calculate_match_distribution(
             t_val = tau(x, y, lambda_home, mu_away, rho)
             unnorm_grid[x, y] = t_val * math.exp(log_px + log_py)
 
+    if not np.all(np.isfinite(unnorm_grid)) or np.any(unnorm_grid < 0):
+        raise ValueError("Invalid Dixon-Coles probability mass.")
     total_calc_mass = float(np.sum(unnorm_grid))
+    if not math.isfinite(total_calc_mass) or total_calc_mass <= 0:
+        raise ValueError("Invalid Dixon-Coles calculation mass.")
     norm_grid = unnorm_grid / total_calc_mass
 
     # Compute 1X2 from normalized distribution
@@ -142,7 +150,7 @@ def calculate_match_distribution(
 
 
 def fit_dixon_coles(
-    matches: List[Tuple[str, str, int, int, datetime]],
+    matches: List[Tuple[str, str, int, int, datetime, datetime]],
     team_list: List[str],
     training_cutoff: datetime,
     xi: float = 0.0018,
@@ -161,8 +169,8 @@ def fit_dixon_coles(
 
     # Filter matches available by training_cutoff
     eligible_matches = []
-    for h, a, hs, as_, dt in matches:
-        if dt <= training_cutoff and h in team_to_idx and a in team_to_idx:
+    for h, a, hs, as_, dt, available_at in matches:
+        if dt <= training_cutoff and available_at <= training_cutoff and h in team_to_idx and a in team_to_idx:
             days_ago = max(0.0, (training_cutoff - dt).total_seconds() / 86400.0)
             weight = math.exp(-xi * days_ago)
             eligible_matches.append((team_to_idx[h], team_to_idx[a], hs, as_, weight))
@@ -214,8 +222,26 @@ def fit_dixon_coles(
     def sum_alpha_constraint(params: np.ndarray) -> float:
         return float(np.sum(params[:n_teams]))
 
+    def tau_constraints(params: np.ndarray) -> np.ndarray:
+        alphas = params[:n_teams]
+        betas = params[n_teams : 2 * n_teams]
+        gamma = params[2 * n_teams]
+        rho = params[2 * n_teams + 1]
+        factors = []
+        for h_idx, a_idx, _, _, _ in eligible_matches:
+            lam = math.exp(alphas[h_idx] - betas[a_idx] + gamma)
+            mu = math.exp(alphas[a_idx] - betas[h_idx])
+            factors.extend((
+                1.0 - lam * mu * rho - 1e-10,
+                1.0 + lam * rho - 1e-10,
+                1.0 + mu * rho - 1e-10,
+                1.0 - rho - 1e-10,
+            ))
+        return np.asarray(factors, dtype=np.float64)
+
     constraints = [
         {"type": "eq", "fun": sum_alpha_constraint},
+        {"type": "ineq", "fun": tau_constraints},
     ]
 
     # Bounds: alphas, betas in [-1.5, 1.5], gamma in [-0.5, 0.8], rho in [-0.15, 0.15]
@@ -230,7 +256,7 @@ def fit_dixon_coles(
         options={"maxiter": 200, "ftol": 1e-6},
     )
 
-    if not res.success and res.fun > 1e10:
+    if not res.success or not math.isfinite(float(res.fun)) or float(res.fun) >= 1e10:
         raise RuntimeError(f"Dixon-Coles optimization failed: {res.message}")
 
     fitted_params = res.x
@@ -239,11 +265,10 @@ def fit_dixon_coles(
     gamma = float(fitted_params[2 * n_teams])
     rho = float(fitted_params[2 * n_teams + 1])
 
-    # Check constraint residual
-    if abs(np.sum(alphas)) > 1e-4:
-        # Re-center alphas to strictly satisfy sum(alpha) == 0
-        mean_alpha = np.mean(alphas)
-        alphas = alphas - mean_alpha
+    if abs(float(np.sum(alphas))) > 1e-5:
+        raise RuntimeError("Dixon-Coles optimization violated sum(alpha) = 0.")
+    if np.any(tau_constraints(fitted_params) < 0):
+        raise RuntimeError("Dixon-Coles optimization violated tau positivity constraints.")
 
     team_attack = {team_list[i]: float(alphas[i]) for i in range(n_teams)}
     team_defense = {team_list[i]: float(betas[i]) for i in range(n_teams)}

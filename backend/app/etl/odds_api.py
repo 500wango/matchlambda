@@ -44,7 +44,7 @@ class OddsApiClient:
     async def fetch_league_odds(
         self,
         league_id: str = "EPL",
-        bookmakers: str = "pinnacle,unibet,betclic,williamhill",
+        bookmakers: str = "pinnacle",
         markets: str = "h2h",
     ) -> List[Dict[str, Any]]:
         """
@@ -59,6 +59,7 @@ class OddsApiClient:
         params = {
             "apiKey": self.api_key,
             "regions": "eu,uk",
+            "bookmakers": bookmakers,
             "markets": markets,
             "oddsFormat": "decimal",
             "dateFormat": "iso",
@@ -199,19 +200,13 @@ class OddsApiClient:
             session.add(MatchSource(source_name="the_odds_api", external_id=event_id, match_id=match_id))
             await session.flush()
 
-        # Find bookmaker: prefer target_bookmaker (e.g. pinnacle), or fallback to first available
-        bookmakers = event.get("bookmakers", [])
+        # Only the configured eligible bookmaker can produce a comparison quote.
+        event_bookmakers = event.get("bookmakers", [])
         selected_bm = None
-        for bm in bookmakers:
+        for bm in event_bookmakers:
             if bm.get("key") == target_bookmaker:
                 selected_bm = bm
                 break
-        if not selected_bm and bookmakers:
-            # Fallback to first bookmaker with h2h market
-            for bm in bookmakers:
-                if any(mkt.get("key") == "h2h" for mkt in bm.get("markets", [])):
-                    selected_bm = bm
-                    break
 
         if not selected_bm:
             return None

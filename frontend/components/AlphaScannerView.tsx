@@ -24,7 +24,7 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
   // Filter & Staking Inputs
   const [bankroll, setBankroll] = useState<number>(5000);
   const [strategy, setStrategy] = useState<string>("HALF_KELLY");
-  const [minEv, setMinEv] = useState<number>(0.04);
+  const [minEv, setMinEv] = useState<number>(0.05);
   const [leagueFilter, setLeagueFilter] = useState<string>("ALL");
 
   const fetchSignals = useCallback(async () => {
@@ -45,10 +45,28 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
   }, [bankroll, strategy, minEv, leagueFilter, lang]);
 
   useEffect(() => {
+    if (!isAnalyst) {
+      setLoading(false);
+      setSignals([]);
+      return;
+    }
     fetchSignals();
-  }, [fetchSignals]);
+  }, [fetchSignals, isAnalyst]);
 
   const isEn = lang === "en";
+
+  if (!isAnalyst) {
+    return (
+      <div className="border-y border-gray-800 py-12 text-center">
+        <Shield className="w-8 h-8 text-emerald-400 mx-auto mb-3" />
+        <h2 className="text-lg font-bold text-white">{isEn ? "Analyst scanner" : "Analyst 专属价值雷达"}</h2>
+        <p className="text-sm text-gray-400 mt-2">{isEn ? "An active Analyst Pass is required to scan fresh quotes." : "扫描最新赔率需要有效 Analyst 权限。"}</p>
+        <button onClick={onOpenPricing} className="mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-md">
+          {isEn ? "View plans" : "查看套餐"}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -58,7 +76,7 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
           <div>
             <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mb-3">
               <Zap className="w-3.5 h-3.5" />
-              <span>{isEn ? "Real-Time +EV Arbitrage & Mispricing Scanner" : "实时 +EV 套利与市场定价偏差扫描雷达"}</span>
+              <span>{isEn ? "Latest eligible +EV market scanner" : "最新有效 +EV 市场价值雷达"}</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
               <span>⚡ {t("scanner.title")}</span>
@@ -111,8 +129,7 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
                 onChange={(e) => setMinEv(Number(e.target.value))}
                 className="py-1.5 px-2.5 bg-[#0f1523] border border-gray-700 rounded-lg text-white font-mono text-xs focus:border-blue-500 focus:outline-none"
               >
-                <option value={0.02}>EV ≥ +2.0%</option>
-                <option value={0.04}>EV ≥ +4.0% ({isEn ? "Recommended" : "建议"})</option>
+                <option value={0.05}>EV ≥ +5.0% ({isEn ? "Recommended" : "建议"})</option>
                 <option value={0.08}>EV ≥ +8.0% ({isEn ? "High Value" : "高价值"})</option>
                 <option value={0.15}>EV ≥ +15.0% ({isEn ? "Extreme Alpha" : "极高偏差"})</option>
               </select>
@@ -136,7 +153,7 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
 
           {/* League quick filter */}
           <div className="flex items-center space-x-1.5 overflow-x-auto text-xs font-mono">
-            {["ALL", "TOP5", "EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1"].map((l) => (
+            {["ALL", "TOP5", "EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "UCL", "UEL", "ALLSVENSKAN", "ELITESERIEN", "SUPERLIGA", "AUSTRIAN_BUNDESLIGA", "CHAMPIONSHIP", "EREDIVISIE", "PRIMEIRA_LIGA", "MLS", "BRASILEIRAO", "SAUDI_PRO_LEAGUE"].map((l) => (
               <button
                 key={l}
                 onClick={() => setLeagueFilter(l)}
@@ -156,7 +173,7 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
           <div className="py-24 text-center">
             <div className="w-10 h-10 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="text-xs text-gray-400 font-mono">
-              {isEn ? "Scanning live market lines and computing Poisson expectations..." : "正在扫描全网 17 大联赛盘口并计算泊松正期望值..."}
+            {isEn ? "Checking current eligible predictions and quotes..." : "正在检查有效预测和赔率快照..."}
             </p>
           </div>
         ) : error ? (
@@ -165,7 +182,7 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
           <div className="py-16 text-center text-gray-400">
             <p className="text-sm">{t("scanner.noSignals")}</p>
             <p className="text-xs text-gray-500 mt-1">
-              {isEn ? "Try lowering the minimum EV threshold or expanding league scope." : "您可以尝试调低最低 EV 门槛或扩大联赛范围。"}
+                {isEn ? "No eligible quote currently meets the selected EV threshold." : "当前没有赔率和预测同时有效、且达到所选 EV 门槛的信号。"}
             </p>
           </div>
         ) : (
@@ -173,7 +190,7 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
             <table className="w-full text-left text-xs font-mono">
               <thead>
                 <tr className="border-b border-gray-800/80 bg-[#0a0e1a] text-gray-400 text-[11px]">
-                  <th className="py-3 px-4">{t("scanner.grade")}</th>
+                  <th className="py-3 px-4">{isEn ? "Quote time" : "赔率时间"}</th>
                   <th className="py-3 px-4">{t("scanner.match")} / {t("scanner.league")}</th>
                   <th className="py-3 px-4">{t("scanner.selection")}</th>
                   <th className="py-3 px-4">{t("scanner.marketOdds")} vs {t("scanner.fairOdds")}</th>
@@ -190,18 +207,10 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
                       key={sig.signal_id}
                       className="hover:bg-blue-950/20 transition group"
                     >
-                      {/* Grade */}
+                      {/* Quote freshness */}
                       <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded text-[11px] font-black ${
-                            sig.confidence_grade === "A+"
-                              ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
-                              : sig.confidence_grade === "A"
-                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                              : "bg-blue-500/20 text-blue-300 border border-blue-500/40"
-                          }`}
-                        >
-                          {sig.confidence_grade}
+                        <span title={sig.quote_at} className="text-gray-300">
+                          {new Date(sig.quote_at).toLocaleString(isEn ? "en-US" : "zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                         </span>
                       </td>
 

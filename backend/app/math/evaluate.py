@@ -3,11 +3,13 @@ import math
 from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Any
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from app.core.database import AsyncSessionLocal
 from app.models import Match, OddsSnapshot
 from app.math.dixon_coles import fit_dixon_coles, calculate_match_distribution
 from app.math.shin import calculate_shin_probabilities
 from app.math.metrics import brier_score_multiclass, log_loss_multiclass
+from app.math.freshness import latest_eligible_quote
 
 
 async def run_chronological_evaluation():
@@ -19,6 +21,7 @@ async def run_chronological_evaluation():
         # Load all finished matches ordered chronologically
         stmt = (
             select(Match)
+            .options(selectinload(Match.odds_snapshots))
             .where(
                 Match.league_id == "EPL",
                 Match.status == "FINISHED",
@@ -28,16 +31,12 @@ async def run_chronological_evaluation():
             .order_by(Match.match_date.asc())
         )
         matches = (await session.execute(stmt)).scalars().all()
+        matches = [m for m in matches if m.result_available_at is not None]
+        matches.sort(key=lambda m: (m.match_date, m.id))
 
         if len(matches) < 20:
             print("Not enough finished matches for chronological folds (need >= 20).")
             return
-
-        team_set = set()
-        for m in matches:
-            team_set.add(m.home_team_id)
-            team_set.add(m.away_team_id)
-        team_list = sorted(list(team_set))
 
         # Split into expanding folds: e.g. train on first 60%, test on remaining 40% in batches
         n_total = len(matches)
@@ -48,7 +47,7 @@ async def run_chronological_evaluation():
         print("MatchLambda — Chronological Expanding Folds Evaluation Report")
         print("=" * 70)
         print(f"Total Completed Matches: {n_total}")
-        print(f"Unique Teams: {len(team_list)}")
+        print(f"Unique Teams: {len({team_id for m in matches for team_id in (m.home_team_id, m.away_team_id)})}")
         print(f"Initial Training Size: {train_initial_size}")
         print(f"Time Decay Parameter: xi = 0.0018 / day")
         print("-" * 70)
@@ -65,11 +64,23 @@ async def run_chronological_evaluation():
             train_matches = matches[:current_train_end]
             test_matches = matches[current_train_end:test_end]
 
-            train_cutoff = train_matches[-1].match_date
+            train_cutoff = test_matches[0].match_date
+            available_train_matches = [
+                m for m in train_matches
+                if m.match_date <= train_cutoff and m.result_available_at <= train_cutoff
+            ]
+            team_list = sorted({
+                team_id
+                for match in available_train_matches
+                for team_id in (match.home_team_id, match.away_team_id)
+            })
 
             train_tuples = [
-                (m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.match_date)
-                for m in train_matches
+                (
+                    m.home_team_id, m.away_team_id, m.home_score, m.away_score,
+                    m.match_date, m.result_available_at,
+                )
+                for m in available_train_matches
             ]
 
             try:
@@ -87,6 +98,12 @@ async def run_chronological_evaluation():
 
             # Predict on test matches
             for tm in test_matches:
+                if tm.home_team_id not in fit_res["team_attack"] or tm.away_team_id not in fit_res["team_attack"]:
+                    continue
+                quote = latest_eligible_quote(tm.odds_snapshots, tm.match_date)
+                if not quote:
+                    continue
+
                 actual = (
                     "HOME"
                     if tm.home_score > tm.away_score
@@ -109,8 +126,15 @@ async def run_chronological_evaluation():
                 except Exception:
                     continue
 
-                # Baseline: 3-way historical frequency or uniform (1/3, 1/3, 1/3)
-                baseline_prob = (0.43, 0.25, 0.32)
+                try:
+                    baseline_prob, _, _ = calculate_shin_probabilities([
+                        float(quote.home_odds),
+                        float(quote.draw_odds),
+                        float(quote.away_odds),
+                    ])
+                except ValueError:
+                    continue
+                baseline_prob = tuple(baseline_prob)
 
                 all_model_preds.append(m_prob)
                 all_market_preds.append(baseline_prob)

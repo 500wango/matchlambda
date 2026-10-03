@@ -55,9 +55,7 @@ def calculate_shin_probabilities(odds: List[float]) -> Tuple[List[float], float,
     f1 = objective(1.0 - 1e-10)
 
     if f0 * f1 > 0:
-        # Fallback to multiplicative if Shin root cannot be bracketed
-        probs = [p / S for p in inv_odds]
-        return probs, 0.0, "MULTIPLICATIVE"
+        raise ValueError("Shin root is not bracketed for this quote.")
 
     z_root = brentq(objective, 0.0, 1.0 - 1e-10, xtol=1e-12, rtol=1e-12)
 
@@ -65,6 +63,9 @@ def calculate_shin_probabilities(odds: List[float]) -> Tuple[List[float], float,
         raise ValueError(f"Invalid Shin z parameter {z_root}, must be in [0, 1).")
 
     probs = [prob_i(z_root, t) for t in pi_sq_over_s]
+
+    if any(not math.isfinite(p) or p < 0.0 or p > 1.0 for p in probs):
+        raise ValueError("Shin probabilities are outside [0, 1].")
 
     # Verify residual and sum error <= 1e-10
     sum_p = sum(probs)

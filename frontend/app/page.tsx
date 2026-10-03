@@ -98,6 +98,7 @@ function HomeContent() {
   const { lang, t } = useI18n();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any | null>(null);
+  const isAnalyst = user?.effective_plan === "ANALYST";
   const [selectedLeague, setSelectedLeague] = useState<string>("TOP5");
   const [activeCategory, setActiveCategory] = useState<string>("五大联赛");
   const [fixtures, setFixtures] = useState<any[]>([]);
@@ -118,12 +119,16 @@ function HomeContent() {
   const [isPricingOpen, setIsPricingOpen] = useState<boolean>(false);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
 
-  // Load real-time ticker signals
+  // Show the same entitlement-gated feed used by the scanner view.
   useEffect(() => {
-    apiRequest<any>("/alpha/scanner?min_ev=0.04&limit=4")
+    if (!isAnalyst) {
+      setLiveTickerSignals([]);
+      return;
+    }
+    apiRequest<any>("/alpha/scanner?min_ev=0.05&limit=4")
       .then((res) => setLiveTickerSignals(res.signals || []))
-      .catch(() => {});
-  }, []);
+      .catch(() => setLiveTickerSignals([]));
+  }, [isAnalyst]);
 
   // Auto open modal on return from NOWPayments hosted checkout
   useEffect(() => {
@@ -187,7 +192,6 @@ function HomeContent() {
     setValueOnly(!valueOnly);
   };
 
-  const isAnalyst = user?.effective_plan === "ANALYST";
   const currentLeagueObj = ALL_LEAGUE_MAP[selectedLeague] || {
     id: selectedLeague,
     name: selectedLeague,
@@ -205,11 +209,11 @@ function HomeContent() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Real-time Live +EV Ticker */}
+        {/* Latest eligible +EV signals */}
         {liveTickerSignals.length > 0 && (
           <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl px-4 py-2.5 flex items-center justify-between overflow-hidden text-xs font-mono">
             <div className="flex items-center space-x-2 flex-shrink-0 mr-4 text-emerald-400 font-bold">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
               <span>{t("tabs.liveTicker")}</span>
             </div>
             <div className="flex items-center space-x-6 overflow-x-auto scrollbar-none whitespace-nowrap">
