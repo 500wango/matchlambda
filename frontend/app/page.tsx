@@ -7,8 +7,11 @@ import { FixtureCard } from "@/components/FixtureCard";
 import { AuthModal } from "@/components/AuthModal";
 import { PricingModal } from "@/components/PricingModal";
 import { AnalysisModal } from "@/components/AnalysisModal";
+import { AlphaScannerView } from "@/components/AlphaScannerView";
+import { BacktestView } from "@/components/BacktestView";
+import { BankrollSimulatorView } from "@/components/BankrollSimulatorView";
 import { apiRequest, setAuthToken } from "@/lib/api";
-import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle, Trophy } from "lucide-react";
+import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle, Trophy, Zap, TrendingUp, Calculator, BarChart3 } from "lucide-react";
 
 interface LeagueOption {
   id: string;
@@ -103,10 +106,21 @@ function HomeContent() {
   const [daysAhead, setDaysAhead] = useState<number>(10);
   const [valueOnly, setValueOnly] = useState<boolean>(false);
 
+  // Terminal Mode View: SCANNER (default), FIXTURES, BACKTEST, SIMULATOR
+  const [terminalTab, setTerminalTab] = useState<"SCANNER" | "FIXTURES" | "BACKTEST" | "SIMULATOR">("SCANNER");
+  const [liveTickerSignals, setLiveTickerSignals] = useState<any[]>([]);
+
   // Modals
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
   const [isPricingOpen, setIsPricingOpen] = useState<boolean>(false);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+
+  // Load real-time ticker signals
+  useEffect(() => {
+    apiRequest<any>("/alpha/scanner?min_ev=0.04&limit=4")
+      .then((res) => setLiveTickerSignals(res.signals || []))
+      .catch(() => {});
+  }, []);
 
   // Auto open modal on return from NOWPayments hosted checkout
   useEffect(() => {
@@ -188,8 +202,116 @@ function HomeContent() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* League Selector Group */}
-        <div className="space-y-3 pb-3 border-b border-gray-800/80">
+        {/* Real-time Live +EV Ticker */}
+        {liveTickerSignals.length > 0 && (
+          <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl px-4 py-2.5 flex items-center justify-between overflow-hidden text-xs font-mono">
+            <div className="flex items-center space-x-2 flex-shrink-0 mr-4 text-emerald-400 font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+              <span>实时 +EV 套利信号流:</span>
+            </div>
+            <div className="flex items-center space-x-6 overflow-x-auto scrollbar-none whitespace-nowrap">
+              {liveTickerSignals.map((sig) => (
+                <button
+                  key={sig.signal_id}
+                  onClick={() => {
+                    setTerminalTab("SCANNER");
+                    setSelectedMatchId(sig.match_id);
+                  }}
+                  className="flex items-center space-x-2 hover:text-emerald-300 transition cursor-pointer"
+                >
+                  <span className="text-gray-400 font-bold">[{sig.league_id}]</span>
+                  <span className="font-bold text-white">{sig.home_team} vs {sig.away_team}</span>
+                  <span className="text-emerald-400 font-bold">({sig.selection_label})</span>
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                    +{sig.ev_pct}% EV
+                  </span>
+                  <span className="text-gray-400">赔率 {sig.market_odds}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Terminal Main Mode Switcher */}
+        <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+          <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none">
+            <button
+              onClick={() => setTerminalTab("SCANNER")}
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+                terminalTab === "SCANNER"
+                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-500/20 border border-emerald-400/40"
+                  : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
+              }`}
+            >
+              <Zap className="w-4 h-4 text-amber-300" />
+              <span>⚡ +EV 价值雷达 (Alpha Scanner)</span>
+            </button>
+
+            <button
+              onClick={() => setTerminalTab("FIXTURES")}
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+                terminalTab === "FIXTURES"
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20 border border-blue-400/40"
+                  : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
+              }`}
+            >
+              <Trophy className="w-4 h-4 text-blue-300" />
+              <span>⚽ 赛程与多盘口预测 (Match Feeds)</span>
+            </button>
+
+            <button
+              onClick={() => setTerminalTab("BACKTEST")}
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+                terminalTab === "BACKTEST"
+                  ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20 border border-purple-400/40"
+                  : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
+              }`}
+            >
+              <TrendingUp className="w-4 h-4 text-purple-300" />
+              <span>📈 量化回测与资金曲线 (Track Record)</span>
+            </button>
+
+            <button
+              onClick={() => setTerminalTab("SIMULATOR")}
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+                terminalTab === "SIMULATOR"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 border border-indigo-400/40"
+                  : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
+              }`}
+            >
+              <Calculator className="w-4 h-4 text-indigo-300" />
+              <span>💼 蒙特卡洛资金模拟器 (Monte Carlo)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* View Content Panels */}
+        {terminalTab === "SCANNER" && (
+          <AlphaScannerView
+            isAnalyst={isAnalyst}
+            onOpenPricing={() => setIsPricingOpen(true)}
+            onSelectMatch={(id) => setSelectedMatchId(id)}
+          />
+        )}
+
+        {terminalTab === "BACKTEST" && (
+          <BacktestView
+            isAnalyst={isAnalyst}
+            onOpenPricing={() => setIsPricingOpen(true)}
+          />
+        )}
+
+        {terminalTab === "SIMULATOR" && (
+          <BankrollSimulatorView
+            isAnalyst={isAnalyst}
+            onOpenPricing={() => setIsPricingOpen(true)}
+          />
+        )}
+
+        {terminalTab === "FIXTURES" && (
+          <>
+            {/* League Selector Group */}
+            <div className="space-y-3 pb-3 border-b border-gray-800/80">
           {/* Category Tabs */}
           <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none">
             <button
@@ -432,6 +554,8 @@ function HomeContent() {
             </div>
           )}
         </div>
+      </>
+    )}
 
         {/* Risk Disclaimer */}
         <div className="p-4 rounded-xl bg-gray-900/40 border border-gray-800 text-[11px] text-gray-500 leading-relaxed font-mono">

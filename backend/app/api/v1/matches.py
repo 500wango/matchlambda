@@ -389,10 +389,22 @@ async def get_match_analysis(
             outcomes=outcomes,
         )
 
+    derived_markets = None
+    if eval_res["prediction"]:
+        from app.math.derivatives import compute_derived_markets
+        p = eval_res["prediction"]
+        derived_markets = compute_derived_markets(
+            score_matrix=p.score_matrix,
+            lambda_home=p.lambda_home,
+            mu_away=p.mu_away,
+            omitted_mass=p.omitted_mass,
+        )
+
     return MatchAnalysisResponse(
         match_id=match.id,
         data_status=eval_res["data_status"],
         reason=eval_res["reason"],
         prediction=pred_detail,
         comparison=comp_detail,
+        derivatives=derived_markets,
     )

@@ -53,3 +53,4 @@ postgres_data/
 .DS_Store
 *.swp
 *~
+*.tsbuildinfo

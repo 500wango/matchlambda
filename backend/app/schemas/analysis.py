@@ -47,3 +47,4 @@ class MatchAnalysisResponse(BaseModel):
     reason: Optional[str] = None
     prediction: Optional[PredictionDetail] = None
     comparison: Optional[ComparisonDetail] = None
+    derivatives: Optional[Dict[str, Any]] = None
