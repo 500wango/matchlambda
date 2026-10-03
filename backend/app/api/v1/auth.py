@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token
 from app.core.exceptions import AppException
+from app.core.rate_limiter import check_rate_limit
 from app.models import User
 from app.schemas.auth import RegisterRequest, RegisterResponse, LoginRequest, TokenResponse, UserResponse
 from app.api.deps import get_current_user, is_active_analyst
@@ -12,7 +13,10 @@ router = APIRouter(prefix="", tags=["Auth"])
 
 
 @router.post("/auth/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
-async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(req: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    await check_rate_limit(f"register:{client_ip}", limit=10, window_seconds=60)
+
     stmt = select(User).where(User.email == req.email)
     existing = (await db.execute(stmt)).scalar_one_or_none()
     if existing:
@@ -35,7 +39,10 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/auth/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    await check_rate_limit(f"login:{client_ip}", limit=10, window_seconds=60)
+
     stmt = select(User).where(User.email == req.email)
     user = (await db.execute(stmt)).scalar_one_or_none()
     if not user or not verify_password(req.password, user.password_hash):

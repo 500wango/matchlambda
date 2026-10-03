@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { FixtureCard } from "@/components/FixtureCard";
 import { AuthModal } from "@/components/AuthModal";
@@ -9,7 +10,8 @@ import { AnalysisModal } from "@/components/AnalysisModal";
 import { apiRequest, setAuthToken } from "@/lib/api";
 import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle } from "lucide-react";
 
-export default function Home() {
+function HomeContent() {
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<any | null>(null);
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [total, setTotal] = useState<number>(0);
@@ -24,6 +26,15 @@ export default function Home() {
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
   const [isPricingOpen, setIsPricingOpen] = useState<boolean>(false);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+
+  // Auto open modal on return from NOWPayments hosted checkout
+  useEffect(() => {
+    const statusParam = searchParams.get("status");
+    const orderIdParam = searchParams.get("order_id");
+    if (statusParam && orderIdParam) {
+      setIsPricingOpen(true);
+    }
+  }, [searchParams]);
 
   const fetchUser = useCallback(async () => {
     try {
@@ -246,5 +257,13 @@ export default function Home() {
 
       <AnalysisModal matchId={selectedMatchId} onClose={() => setSelectedMatchId(null)} />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#080c14] flex items-center justify-center text-gray-500 font-mono text-xs">Loading MatchLambda...</div>}>
+      <HomeContent />
+    </Suspense>
   );
 }

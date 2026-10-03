@@ -23,6 +23,18 @@ export const PricingModal: React.FC<PricingModalProps> = ({
   const [activeOrder, setActiveOrder] = useState<any | null>(null);
   const [pollingStatus, setPollingStatus] = useState<string | null>(null);
 
+  // Check URL on open
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const orderId = urlParams.get("order_id");
+      if (orderId && !activeOrder) {
+        setActiveOrder({ order_id: orderId, payment_status: "PENDING" });
+        setPollingStatus("PENDING");
+      }
+    }
+  }, [isOpen]);
+
   // Poll order status
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;

@@ -3,7 +3,9 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from sqlalchemy import select
 from app.core.database import AsyncSessionLocal
-from app.models import League, Team, TeamAlias, Match, OddsSnapshot
+from app.models import League, Team, TeamAlias, Match, OddsSnapshot, ModelParameter, Prediction
+from app.math.dixon_coles import calculate_match_distribution
+from app.math.shin import calculate_shin_probabilities
 
 EPL_TEAMS = [
     ("arsenal", "Arsenal", "England"),
@@ -196,6 +198,59 @@ async def seed_database():
                     away_team_id=a_team,
                     status="SCHEDULED",
                 ))
+
+        await session.flush()
+
+        # Deterministic local data keeps the development UI useful. The scheduled
+        # pipeline replaces these records with provider-backed snapshots.
+        model = (await session.execute(
+            select(ModelParameter).where(ModelParameter.model_version == "dc-demo-1")
+        )).scalar_one_or_none()
+        if not model:
+            model = ModelParameter(
+                league_id="EPL",
+                model_version="dc-demo-1",
+                training_cutoff=now - timedelta(days=1),
+                calculated_at=now - timedelta(hours=1),
+                training_data_ref="dataset://EPL/demo-seed-v1",
+                home_advantage=0.25,
+                rho=0.0,
+                xi_decay=0.0018,
+                team_attack={team_id: 0.0 for team_id, _, _ in EPL_TEAMS},
+                team_defense={team_id: 0.0 for team_id, _, _ in EPL_TEAMS},
+            )
+            session.add(model)
+            await session.flush()
+
+        for m_id, m_date, _, _ in scheduled_fixtures:
+            existing = (await session.execute(
+                select(Prediction).where(Prediction.match_id == m_id)
+            )).scalar_one_or_none()
+            if existing:
+                continue
+            as_of = m_date - timedelta(hours=2)
+            odds_h, odds_d, odds_a = 1.90, 3.75, 4.50
+            market_probs, _, method = calculate_shin_probabilities([odds_h, odds_d, odds_a])
+            odds = OddsSnapshot(
+                match_id=m_id, source_name="demo", bookmaker="DEMO_BOOK",
+                quote_at=as_of - timedelta(minutes=1), recorded_at=as_of,
+                home_odds=Decimal(str(odds_h)), draw_odds=Decimal(str(odds_d)),
+                away_odds=Decimal(str(odds_a)), dejuice_method=method,
+                implied_prob_home=market_probs[0], implied_prob_draw=market_probs[1],
+                implied_prob_away=market_probs[2],
+            )
+            session.add(odds)
+            await session.flush()
+            dist = calculate_match_distribution(1.78, 0.92, 0.0)
+            session.add(Prediction(
+                match_id=m_id, model_parameters_id=model.id, odds_snapshot_id=odds.id,
+                as_of=as_of, kickoff_at_prediction=m_date,
+                generated_at=as_of + timedelta(seconds=1),
+                lambda_home=dist["lambda_home"], mu_away=dist["mu_away"],
+                prob_home_win=dist["prob_home_win"], prob_draw=dist["prob_draw"],
+                prob_away_win=dist["prob_away_win"], score_matrix=dist["score_matrix"],
+                omitted_mass=dist["omitted_mass"], top_scores=dist["top_scores"],
+            ))
 
         await session.commit()
         print("Database seeded successfully.")

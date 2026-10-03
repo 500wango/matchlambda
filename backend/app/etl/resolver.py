@@ -82,3 +82,40 @@ class TeamResolver:
 
         scored_candidates.sort(key=lambda x: x[2], reverse=True)
         return scored_candidates[:limit]
+
+    @staticmethod
+    async def log_unresolved_entity(
+        session: AsyncSession,
+        source_name: str,
+        external_name: str,
+        country: str = "England",
+        external_id: Optional[str] = None,
+        filepath: str = "data/rejected_entities.jsonl",
+    ):
+        """
+        Appends ambiguous/unmatched entity to operator review file adhering to ETL spec.
+        """
+        import os
+        import json
+        from datetime import datetime, timezone
+
+        candidates = await TeamResolver.propose_candidates(
+            session=session,
+            external_name=external_name,
+            country=country,
+        )
+
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source_name": source_name,
+            "external_id": external_id,
+            "external_name": external_name,
+            "country": country,
+            "suggested_candidates": [
+                {"team_id": cid, "canonical_name": cname, "score": score}
+                for cid, cname, score in candidates
+            ],
+        }
+        with open(filepath, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")

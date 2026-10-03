@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.exceptions import AppException
+from app.core.rate_limiter import check_rate_limit
 from app.models import User, CryptoInvoice
 from app.schemas.payment import CreateInvoiceRequest, InvoiceResponse, OrderDetailResponse
 from app.api.deps import get_current_user
@@ -37,6 +38,8 @@ async def create_invoice(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Rate limit by user_id: max 5 invoices per minute
+    await check_rate_limit(f"create_invoice:{user.id}", limit=5, window_seconds=60)
     # 1. Validate UUID idempotency key
     try:
         request_uuid = uuid.UUID(idempotency_key)

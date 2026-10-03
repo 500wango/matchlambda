@@ -94,8 +94,22 @@ class OddsApiClient:
             country="England",
         )
 
+        if not home_id:
+            await TeamResolver.log_unresolved_entity(
+                session=session,
+                source_name="the_odds_api",
+                external_name=home_ext,
+                country="England",
+            )
+        if not away_id:
+            await TeamResolver.log_unresolved_entity(
+                session=session,
+                source_name="the_odds_api",
+                external_name=away_ext,
+                country="England",
+            )
+
         if not home_id or not away_id:
-            # Unmapped team: record operator review notice, do not auto-create
             logger.warning(
                 f"Unresolved entity: home='{home_ext}' (id={home_id}), away='{away_ext}' (id={away_id})"
             )
