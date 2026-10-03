@@ -36,9 +36,9 @@ export const FixtureCard: React.FC<FixtureCardProps> = ({
       {/* Top row: league & date */}
       <div className="flex items-center justify-between text-xs text-gray-400 mb-4 pb-3 border-b border-gray-800/60 font-mono">
         <span className="font-bold text-blue-400 uppercase tracking-wider">{fixture.league_id}</span>
-        <div className="flex items-center space-x-1.5">
+        <div className="flex items-center space-x-1.5" suppressHydrationWarning>
           <Clock className="w-3.5 h-3.5 text-gray-500" />
-          <span>
+          <span suppressHydrationWarning>
             {formattedDate} · {formattedTime}
           </span>
         </div>

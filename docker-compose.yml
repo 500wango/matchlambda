@@ -34,7 +34,7 @@ services:
     volumes:
       - ./backend:/app
     ports:
-      - "127.0.0.1:8000:8000"
+      - "8000:8000"
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
@@ -96,11 +96,11 @@ services:
       - ./frontend:/app
       - /app/node_modules
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     environment:
       NODE_ENV: development
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/v1}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000/v1}
     depends_on:
       - api
 
