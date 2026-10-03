@@ -181,14 +181,15 @@ def compile_daily_picks(
         ev_d = calculate_ev(p_d, d_odds)
         ev_a = calculate_ev(p_a, a_odds)
 
-        # 1. Check Banker Candidate (Highest Win Prob >= 50%)
-        if p_h >= 0.50 or p_a >= 0.50:
-            is_home = p_h >= p_a
-            b_prob = p_h if is_home else p_a
-            b_odds = h_odds if is_home else a_odds
-            b_ev = ev_h if is_home else ev_a
-            b_code = "HOME_WIN" if is_home else "AWAY_WIN"
-            
+        # 1. Check Banker Candidate (Win Prob >= 48% AND Realistic Banker Odds 1.15 <= odds <= 2.25)
+        # Avoid anomalous underdogs with misestimated high probabilities
+        banker_opts = []
+        if p_h >= 0.48 and 1.15 <= h_odds <= 2.25:
+            banker_opts.append((True, p_h, h_odds, ev_h, "HOME_WIN"))
+        if p_a >= 0.48 and 1.15 <= a_odds <= 2.25:
+            banker_opts.append((False, p_a, a_odds, ev_a, "AWAY_WIN"))
+
+        for is_home, b_prob, b_odds, b_ev, b_code in banker_opts:
             if is_en:
                 b_name = f"{m.home_team.canonical_name} (Home Win)" if is_home else f"{m.away_team.canonical_name} (Away Win)"
                 cat_label = "⭐ Daily Banker"
@@ -236,13 +237,14 @@ def compile_daily_picks(
                 ],
             })
 
-        # 2. Check Value Candidates (EV >= 5%, Win Prob >= 35%)
+        # 2. Check Value Candidates (EV >= 3% and EV <= 40% outlier cap, Win Prob >= 35%, Odds 1.30 <= odds <= 3.30)
+        # Filters out extreme outlier EVs caused by uncalibrated underdog tails (>40% EV is noise in mature 1X2 markets)
         val_cands = [
             ("HOME_WIN", f"{m.home_team.canonical_name} (Home Win)" if is_en else f"{m.home_team.canonical_name} (主胜)", p_h, h_odds, ev_h),
             ("AWAY_WIN", f"{m.away_team.canonical_name} (Away Win)" if is_en else f"{m.away_team.canonical_name} (客胜)", p_a, a_odds, ev_a),
         ]
         for code, name, prob, o, ev in val_cands:
-            if ev >= 0.05 and prob >= 0.35:
+            if 0.03 <= ev <= 0.40 and prob >= 0.35 and 1.30 <= o <= 3.30:
                 fair = round(1.0 / prob, 2) if prob > 0 else 99.0
                 values.append({
                     **match_meta,
@@ -255,8 +257,9 @@ def compile_daily_picks(
                     "market_odds": o,
                     "fair_odds": fair,
                     "model_probability": round(prob, 4),
-                    "confidence_stars": 5 if ev >= 0.20 else 4,
+                    "confidence_stars": 5 if ev >= 0.15 else 4,
                     "ev_pct": round(ev * 100, 1),
+                    "risk_adjusted_score": round(prob * ev, 4),
                     "reasoning": generate_rationale(
                         "VALUE",
                         m.home_team.canonical_name,
@@ -279,14 +282,15 @@ def compile_daily_picks(
                     ],
                 })
 
-        # 3. Check Underdog / Draw Candidates (Odds >= 3.0, EV >= 10%)
+        # 3. Check Underdog / Draw Candidates (Sensible High Odds 2.50 <= odds <= 4.50, EV >= 5% and EV <= 45%)
+        # Excludes 20x-50x astronomical longshots that mathematically break parlay variance
         dog_cands = [
             ("DRAW", "Draw (平局)" if is_en else "平局 (Draw)", p_d, d_odds, ev_d),
             ("HOME_WIN", f"{m.home_team.canonical_name} (Home Dog)" if is_en else f"{m.home_team.canonical_name} (主胜高赔)", p_h, h_odds, ev_h),
             ("AWAY_WIN", f"{m.away_team.canonical_name} (Away Dog)" if is_en else f"{m.away_team.canonical_name} (客胜高赔)", p_a, a_odds, ev_a),
         ]
         for code, name, prob, o, ev in dog_cands:
-            if o >= 3.0 and ev >= 0.10:
+            if 2.50 <= o <= 4.50 and 0.05 <= ev <= 0.45:
                 fair = round(1.0 / prob, 2) if prob > 0 else 99.0
                 underdogs.append({
                     **match_meta,
@@ -299,7 +303,7 @@ def compile_daily_picks(
                     "market_odds": o,
                     "fair_odds": fair,
                     "model_probability": round(prob, 4),
-                    "confidence_stars": 4 if ev >= 0.30 else 3,
+                    "confidence_stars": 4 if ev >= 0.20 else 3,
                     "ev_pct": round(ev * 100, 1),
                     "reasoning": generate_rationale(
                         "UNDERDOG",
@@ -327,10 +331,12 @@ def compile_daily_picks(
         if goal_pick:
             goals_list.append(goal_pick)
 
-    # Sort each category
+    # Sort each category using risk-aware quantitative standards
     bankers.sort(key=lambda x: x["model_probability"], reverse=True)
-    values.sort(key=lambda x: x["ev_pct"], reverse=True)
-    underdogs.sort(key=lambda x: x["market_odds"] * (x["ev_pct"] / 100.0), reverse=True)
+    # Values sorted by risk-adjusted expectation score (probability * EV) so solid win-rates rank higher than volatile lines
+    values.sort(key=lambda x: x.get("risk_adjusted_score", x["ev_pct"]), reverse=True)
+    # Underdogs sorted by positive EV
+    underdogs.sort(key=lambda x: x["ev_pct"], reverse=True)
     goals_list.sort(key=lambda x: x["expected_goals"]["total"], reverse=True)
 
     top_bankers = bankers[:6]
@@ -367,22 +373,38 @@ def _build_smart_parlays(
     lang: str = "zh",
 ) -> List[Dict[str, Any]]:
     """
-    Constructs 3 high-grade parlays with combined odds, joint win probabilities,
-    and 1-click clipboard summaries in either Chinese or English.
+    Constructs 3 realistic, disciplined parlays with capped combined odds and joint probabilities:
+    1. Safe 2-Fold (稳健 2 串 1): target combined odds 1.8x ~ 3.8x
+    2. Golden 3-Fold (黄金进阶 3 串 1): target combined odds 3.5x ~ 9.5x
+    3. Longshot 3-Fold (梦想搏冷 3 串 1): target combined odds 15.0x ~ 45.0x
     """
     is_en = lang == "en"
     parlays = []
 
-    # Each leg must have a stored market price and come from a different fixture.
-    unique_bankers = list({pick["match_id"]: pick for pick in bankers}.values())
+    # 1. 2-fold banker estimate (Target combined odds 1.8 ~ 3.8)
+    unique_bankers = []
+    seen_banker_matches = set()
+    for b in bankers:
+        if b["match_id"] not in seen_banker_matches and b["market_odds"] <= 2.10:
+            unique_bankers.append(b)
+            seen_banker_matches.add(b["match_id"])
 
-    # 1. 2-fold banker estimate
+    # Fallback if fewer than 2 bankers strictly <= 2.10
+    if len(unique_bankers) < 2:
+        for b in bankers:
+            if b["match_id"] not in seen_banker_matches:
+                unique_bankers.append(b)
+                seen_banker_matches.add(b["match_id"])
+            if len(unique_bankers) >= 2:
+                break
+
     if len(unique_bankers) >= 2:
         leg1, leg2 = unique_bankers[:2]
         c_odds = round(leg1["market_odds"] * leg2["market_odds"], 2)
         j_prob = round(leg1["model_probability"] * leg2["model_probability"], 4)
         j_ev = round((j_prob * c_odds - 1.0) * 100, 1)
 
+        ev_str = f"+{j_ev}%" if j_ev >= 0 else f"{j_ev}%"
         if is_en:
             title = "🛡️ Daily 2-Fold Estimate"
             subtitle = "Product of the two model probabilities; assumes independent fixtures"
@@ -391,7 +413,7 @@ def _build_smart_parlays(
                 f"【MatchLambda Safe 2-Fold Parlay Ticket】\n"
                 f"1. [{leg1['league_id']}] {leg1['home_team']} vs {leg1['away_team']} -> Pick: {leg1['selection_name']} @{leg1['market_odds']:.2f}\n"
                 f"2. [{leg2['league_id']}] {leg2['home_team']} vs {leg2['away_team']} -> Pick: {leg2['selection_name']} @{leg2['market_odds']:.2f}\n"
-                f"Combined Odds: {c_odds:.2f} | Est. Win Rate: {round(j_prob*100, 1)}% | Expected EV: +{j_ev}%\n"
+                f"Combined Odds: {c_odds:.2f} | Est. Win Rate: {round(j_prob*100, 1)}% | Expected EV: {ev_str}\n"
                 f"Stake Recommendation: Stake ¥100 -> Est. Payout: ¥{round(100 * c_odds, 1)}"
             )
         else:
@@ -402,7 +424,7 @@ def _build_smart_parlays(
                 f"【MatchLambda 稳健 2 串 1 方案】\n"
                 f"1. [{leg1['league_id']}] {leg1['home_team']} vs {leg1['away_team']} -> 推荐: {leg1['selection_name']} @{leg1['market_odds']:.2f}\n"
                 f"2. [{leg2['league_id']}] {leg2['home_team']} vs {leg2['away_team']} -> 推荐: {leg2['selection_name']} @{leg2['market_odds']:.2f}\n"
-                f"组合赔率: {c_odds:.2f} | 预估命中率: {round(j_prob*100, 1)}% | 期望盈利率: +{j_ev}%\n"
+                f"组合赔率: {c_odds:.2f} | 预估命中率: {round(j_prob*100, 1)}% | 期望盈利率: {ev_str}\n"
                 f"投注建议: 投 100 元预计奖金 {round(100 * c_odds, 1)} 元"
             )
 
@@ -443,52 +465,61 @@ def _build_smart_parlays(
             ],
         })
 
-    # 2. 黄金进阶 3 串 1 (Balanced 3-fold)
-    leg_banker = bankers[0] if bankers else None
-    leg_val = values[0] if values else None
-    leg_goal = None
-
+    # 2. 黄金进阶 3 串 1 (Balanced 3-fold, Target Combined Odds 3.5 ~ 9.5)
     selected_matches = set()
     b_legs = []
-    for cand in [leg_banker, leg_val, leg_goal]:
-        if cand and cand["match_id"] not in selected_matches:
-            b_legs.append(cand)
-            selected_matches.add(cand["match_id"])
 
-    for cand in values + bankers:
+    # Leg 1: Banker (odds <= 2.05)
+    for b in unique_bankers:
+        if b["market_odds"] <= 2.05 and b["match_id"] not in selected_matches:
+            b_legs.append(b)
+            selected_matches.add(b["match_id"])
+            break
+
+    # Leg 2 & 3: High value picks with realistic odds (odds <= 3.30)
+    for v in values:
         if len(b_legs) >= 3:
             break
-        if cand and cand["match_id"] not in selected_matches:
-            b_legs.append(cand)
-            selected_matches.add(cand["match_id"])
+        if v["match_id"] not in selected_matches and v["market_odds"] <= 3.30:
+            b_legs.append(v)
+            selected_matches.add(v["match_id"])
+
+    # Fill with any remaining bankers if needed
+    for b in unique_bankers:
+        if len(b_legs) >= 3:
+            break
+        if b["match_id"] not in selected_matches:
+            b_legs.append(b)
+            selected_matches.add(b["match_id"])
 
     if len(b_legs) >= 3:
         c_odds = round(b_legs[0]["market_odds"] * b_legs[1]["market_odds"] * b_legs[2]["market_odds"], 2)
         j_prob = round(b_legs[0]["model_probability"] * b_legs[1]["model_probability"] * b_legs[2]["model_probability"], 4)
         j_ev = round((j_prob * c_odds - 1.0) * 100, 1)
+        ev_str = f"+{j_ev}%" if j_ev >= 0 else f"{j_ev}%"
 
         if is_en:
             title = "🔥 Golden 3-Fold (Balanced Risk/Reward)"
-            subtitle = "Banker + Mispriced Value Line + High Scoring Over, scientifically curated"
+            subtitle = "Banker + Mispriced Value Line + Balanced Pick, scientifically curated"
             badge = "Golden Combo"
             copy_text = (
                 f"【MatchLambda Golden 3-Fold Parlay Ticket】\n"
                 f"1. [{b_legs[0]['league_id']}] {b_legs[0]['home_team']} vs {b_legs[0]['away_team']} -> {b_legs[0]['selection_name']} @{b_legs[0]['market_odds']:.2f}\n"
                 f"2. [{b_legs[1]['league_id']}] {b_legs[1]['home_team']} vs {b_legs[1]['away_team']} -> {b_legs[1]['selection_name']} @{b_legs[1]['market_odds']:.2f}\n"
                 f"3. [{b_legs[2]['league_id']}] {b_legs[2]['home_team']} vs {b_legs[2]['away_team']} -> {b_legs[2]['selection_name']} @{b_legs[2]['market_odds']:.2f}\n"
-                f"Combined Odds: {c_odds:.2f} | Est. Win Rate: {round(j_prob*100, 1)}% | Expected EV: +{j_ev}%\n"
+                f"Combined Odds: {c_odds:.2f} | Est. Win Rate: {round(j_prob*100, 1)}% | Expected EV: {ev_str}\n"
                 f"Stake Recommendation: Stake ¥50 -> Est. Payout: ¥{round(50 * c_odds, 1)}"
             )
         else:
             title = "🔥 黄金进阶 3 串 1 (中倍高盈亏比)"
-            subtitle = "稳胆 + 价值盘口 + 大球组合，科学搭配，盈亏比极佳"
+            subtitle = "稳胆 + 价值盘口 + 精选中赔组合，科学搭配，盈亏比极佳"
             badge = "黄金组合"
             copy_text = (
                 f"【MatchLambda 黄金 3 串 1 方案】\n"
                 f"1. [{b_legs[0]['league_id']}] {b_legs[0]['home_team']} vs {b_legs[0]['away_team']} -> {b_legs[0]['selection_name']} @{b_legs[0]['market_odds']:.2f}\n"
                 f"2. [{b_legs[1]['league_id']}] {b_legs[1]['home_team']} vs {b_legs[1]['away_team']} -> {b_legs[1]['selection_name']} @{b_legs[1]['market_odds']:.2f}\n"
                 f"3. [{b_legs[2]['league_id']}] {b_legs[2]['home_team']} vs {b_legs[2]['away_team']} -> {b_legs[2]['selection_name']} @{b_legs[2]['market_odds']:.2f}\n"
-                f"组合赔率: {c_odds:.2f} | 预估命中率: {round(j_prob*100, 1)}% | 期望盈利率: +{j_ev}%\n"
+                f"组合赔率: {c_odds:.2f} | 预估命中率: {round(j_prob*100, 1)}% | 期望盈利率: {ev_str}\n"
                 f"投注建议: 投 50 元预计奖金 {round(50 * c_odds, 1)} 元"
             )
 
@@ -520,11 +551,11 @@ def _build_smart_parlays(
             ],
         })
 
-    # 3. 梦想搏冷 3 串 1 (Lottery High Odds)
+    # 3. 梦想搏冷 3 串 1 (Lottery High Odds, Target Combined Odds 15.0 ~ 45.0)
     dog_legs = []
     dog_seen = set()
     for d in underdogs:
-        if d["match_id"] not in dog_seen:
+        if d["match_id"] not in dog_seen and 2.50 <= d["market_odds"] <= 4.20:
             dog_legs.append(d)
             dog_seen.add(d["match_id"])
         if len(dog_legs) >= 3:
@@ -534,6 +565,7 @@ def _build_smart_parlays(
         c_odds = round(dog_legs[0]["market_odds"] * dog_legs[1]["market_odds"] * dog_legs[2]["market_odds"], 2)
         j_prob = round(dog_legs[0]["model_probability"] * dog_legs[1]["model_probability"] * dog_legs[2]["model_probability"], 4)
         j_ev = round((j_prob * c_odds - 1.0) * 100, 1)
+        ev_str = f"+{j_ev}%" if j_ev >= 0 else f"{j_ev}%"
 
         if is_en:
             title = "💣 Longshot 3-Fold Lottery (10x+ High Payout)"
