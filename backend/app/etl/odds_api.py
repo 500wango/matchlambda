@@ -1,3 +1,4 @@
+import re
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -7,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models import Match, MatchSource, OddsSnapshot
+from app.models import Match, MatchSource, OddsSnapshot, Team, TeamAlias
 from app.etl.resolver import TeamResolver
 from app.math.shin import calculate_shin_probabilities
 
@@ -43,7 +44,7 @@ class OddsApiClient:
     async def fetch_league_odds(
         self,
         league_id: str = "EPL",
-        bookmakers: str = "pinnacle",
+        bookmakers: str = "pinnacle,unibet,betclic,williamhill",
         markets: str = "h2h",
     ) -> List[Dict[str, Any]]:
         """
@@ -59,7 +60,6 @@ class OddsApiClient:
             "apiKey": self.api_key,
             "regions": "eu,uk",
             "markets": markets,
-            "bookmakers": bookmakers,
             "oddsFormat": "decimal",
             "dateFormat": "iso",
         }
@@ -69,7 +69,7 @@ class OddsApiClient:
                 resp = await client.get(url, params=params)
                 if resp.status_code == 200:
                     remaining = resp.headers.get("x-requests-remaining")
-                    logger.info(f"The Odds API fetched successfully. Requests remaining: {remaining}")
+                    logger.info(f"The Odds API fetched for {league_id}. Requests remaining: {remaining}")
                     return resp.json()
                 elif resp.status_code == 401:
                     logger.error("The Odds API authorization failed: invalid API key.")
@@ -80,14 +80,23 @@ class OddsApiClient:
                 else:
                     logger.error(f"The Odds API error {resp.status_code}: {resp.text}")
                     return []
-            except httpx.RequestError as e:
-                logger.error(f"Network error querying The Odds API: {e}")
+            except Exception as e:
+                logger.error(f"Failed to fetch from The Odds API for {league_id}: {e}")
                 return []
+
+    async def fetch_epl_odds(
+        self,
+        bookmakers: str = "pinnacle",
+        markets: str = "h2h",
+    ) -> List[Dict[str, Any]]:
+        return await self.fetch_league_odds(league_id="EPL", bookmakers=bookmakers, markets=markets)
 
     async def ingest_odds_event(
         self,
         session: AsyncSession,
         event: Dict[str, Any],
+        league_id: str = "EPL",
+        league_country: str = "England",
         target_bookmaker: str = "pinnacle",
     ) -> Optional[OddsSnapshot]:
         """
@@ -101,40 +110,51 @@ class OddsApiClient:
         if not (event_id and home_ext and away_ext and commence_time_str):
             return None
 
-        # Resolve team identities using confirmed resolver
+        # Resolve or auto-register home team
         home_id = await TeamResolver.resolve_team(
             session=session,
             source_name="the_odds_api",
             external_name=home_ext,
-            country="England",
+            country=league_country,
         )
+        if not home_id:
+            home_slug = re.sub(r'[^a-z0-9]+', '-', home_ext.lower()).strip('-')
+            stmt_t = select(Team).where(Team.id == home_slug)
+            existing_t = (await session.execute(stmt_t)).scalar_one_or_none()
+            if not existing_t:
+                session.add(Team(id=home_slug, canonical_name=home_ext, country=league_country))
+                await session.flush()
+            session.add(TeamAlias(
+                source_name="the_odds_api",
+                external_name=home_ext,
+                country=league_country,
+                team_id=home_slug,
+            ))
+            await session.flush()
+            home_id = home_slug
+
+        # Resolve or auto-register away team
         away_id = await TeamResolver.resolve_team(
             session=session,
             source_name="the_odds_api",
             external_name=away_ext,
-            country="England",
+            country=league_country,
         )
-
-        if not home_id:
-            await TeamResolver.log_unresolved_entity(
-                session=session,
-                source_name="the_odds_api",
-                external_name=home_ext,
-                country="England",
-            )
         if not away_id:
-            await TeamResolver.log_unresolved_entity(
-                session=session,
+            away_slug = re.sub(r'[^a-z0-9]+', '-', away_ext.lower()).strip('-')
+            stmt_t = select(Team).where(Team.id == away_slug)
+            existing_t = (await session.execute(stmt_t)).scalar_one_or_none()
+            if not existing_t:
+                session.add(Team(id=away_slug, canonical_name=away_ext, country=league_country))
+                await session.flush()
+            session.add(TeamAlias(
                 source_name="the_odds_api",
                 external_name=away_ext,
-                country="England",
-            )
-
-        if not home_id or not away_id:
-            logger.warning(
-                f"Unresolved entity: home='{home_ext}' (id={home_id}), away='{away_ext}' (id={away_id})"
-            )
-            return None
+                country=league_country,
+                team_id=away_slug,
+            ))
+            await session.flush()
+            away_id = away_slug
 
         kickoff = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
 
@@ -146,21 +166,21 @@ class OddsApiClient:
         match_id = (await session.execute(stmt)).scalar_one_or_none()
 
         if not match_id:
-            # Find scheduled match with same teams
+            # Check scheduled match with same teams and league
             stmt_m = select(Match.id).where(
-                Match.league_id == "EPL",
+                Match.league_id == league_id,
                 Match.home_team_id == home_id,
                 Match.away_team_id == away_id,
                 Match.status == "SCHEDULED",
             )
             match_id = (await session.execute(stmt_m)).scalar_one_or_none()
             if not match_id:
-                # Create match
-                match_id = f"EPL_TOA_{event_id[:16]}"
+                # Create real match with actual kickoff time
+                match_id = f"{league_id}_TOA_{event_id[:16]}"
                 new_match = Match(
                     id=match_id,
-                    league_id="EPL",
-                    season="2024-2025",
+                    league_id=league_id,
+                    season="2026-2027",
                     match_date=kickoff,
                     home_team_id=home_id,
                     away_team_id=away_id,
@@ -168,21 +188,35 @@ class OddsApiClient:
                 )
                 session.add(new_match)
                 await session.flush()
+            else:
+                # Update match_date to real kickoff
+                stmt_up = select(Match).where(Match.id == match_id)
+                m_obj = (await session.execute(stmt_up)).scalar_one()
+                m_obj.match_date = kickoff
+                await session.flush()
 
             # Record match source mapping
             session.add(MatchSource(source_name="the_odds_api", external_id=event_id, match_id=match_id))
             await session.flush()
 
-        # Find requested bookmaker's complete 1X2 quote
+        # Find bookmaker: prefer target_bookmaker (e.g. pinnacle), or fallback to first available
         bookmakers = event.get("bookmakers", [])
         selected_bm = None
         for bm in bookmakers:
             if bm.get("key") == target_bookmaker:
                 selected_bm = bm
                 break
+        if not selected_bm and bookmakers:
+            # Fallback to first bookmaker with h2h market
+            for bm in bookmakers:
+                if any(mkt.get("key") == "h2h" for mkt in bm.get("markets", [])):
+                    selected_bm = bm
+                    break
 
         if not selected_bm:
             return None
+
+        actual_bookmaker = selected_bm.get("key", target_bookmaker)
 
         # Extract h2h market
         h2h_market = None
@@ -196,7 +230,7 @@ class OddsApiClient:
 
         last_update_str = h2h_market.get("last_update")
         if not last_update_str:
-            return None
+            last_update_str = datetime.now(timezone.utc).isoformat()
 
         quote_at = datetime.fromisoformat(last_update_str.replace("Z", "+00:00"))
         recorded_at = datetime.now(timezone.utc)
@@ -234,7 +268,7 @@ class OddsApiClient:
         # Snapshot uniqueness check: (source_name, bookmaker, match_id, quote_at)
         stmt_snap = select(OddsSnapshot).where(
             OddsSnapshot.source_name == "the_odds_api",
-            OddsSnapshot.bookmaker == target_bookmaker,
+            OddsSnapshot.bookmaker == actual_bookmaker,
             OddsSnapshot.match_id == match_id,
             OddsSnapshot.quote_at == quote_at,
         )
@@ -245,7 +279,7 @@ class OddsApiClient:
         snapshot = OddsSnapshot(
             match_id=match_id,
             source_name="the_odds_api",
-            bookmaker=target_bookmaker,
+            bookmaker=actual_bookmaker,
             quote_at=quote_at,
             recorded_at=recorded_at,
             home_odds=odds_home,

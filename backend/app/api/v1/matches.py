@@ -161,7 +161,7 @@ def evaluate_fixture_analysis(
 @router.get("/fixtures", response_model=FixturesResponse)
 async def get_fixtures(
     league_id: Optional[str] = Query(None),
-    days_ahead: int = Query(3, ge=1, le=7),
+    days_ahead: int = Query(10, ge=1, le=30),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     has_value: Optional[bool] = Query(None),

@@ -18,7 +18,7 @@ async def test_complete_user_analyst_journey():
         settings.NOWPAYMENTS_IPN_SECRET = "secret_for_e2e_journey_test"
 
         # 1. Anonymous user explores fixtures
-        res = await client.get("/v1/matches/fixtures?league_id=EPL&days_ahead=7")
+        res = await client.get("/v1/matches/fixtures?league_id=EPL&days_ahead=14")
         assert res.status_code == 200
         fixtures_data = res.json()
         assert fixtures_data["total"] >= 1
@@ -114,7 +114,7 @@ async def test_complete_user_analyst_journey():
 
         # 11. Access paid fixtures list with has_value filter
         res_fixtures_analyst = await client.get(
-            "/v1/matches/fixtures?league_id=EPL&days_ahead=7",
+            "/v1/matches/fixtures?league_id=EPL&days_ahead=14",
             headers=auth_headers,
         )
         assert res_fixtures_analyst.status_code == 200

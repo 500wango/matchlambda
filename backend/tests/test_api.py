@@ -217,10 +217,14 @@ async def test_payment_and_analyst_entitlement():
         assert res.json()["plan_expires_at"] == prev_expiry
 
         # 10. Access analysis route as ANALYST -> 200
-        res = await client.get("/v1/matches/EPL_DEMO_001/analysis", headers=headers)
+        res_fix = await client.get("/v1/matches/fixtures?league_id=EPL&days_ahead=14")
+        assert res_fix.status_code == 200
+        first_match_id = res_fix.json()["fixtures"][0]["match_id"]
+
+        res = await client.get(f"/v1/matches/{first_match_id}/analysis", headers=headers)
         assert res.status_code == 200
         analysis_data = res.json()
-        assert analysis_data["match_id"] == "EPL_DEMO_001"
+        assert analysis_data["match_id"] == first_match_id
         assert analysis_data["data_status"] in ("AVAILABLE", "STALE", "UNAVAILABLE")
         if analysis_data["prediction"]:
             assert "score_matrix" in analysis_data["prediction"]

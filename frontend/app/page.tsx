@@ -68,7 +68,7 @@ function HomeContent() {
   const [error, setError] = useState<string | null>(null);
 
   // Filters
-  const [daysAhead, setDaysAhead] = useState<number>(5);
+  const [daysAhead, setDaysAhead] = useState<number>(10);
   const [valueOnly, setValueOnly] = useState<boolean>(false);
 
   // Modals
@@ -246,7 +246,7 @@ function HomeContent() {
               <Calendar className="w-3.5 h-3.5 mr-1.5 text-blue-400" /> Kickoff Window:
             </span>
             <div className="flex items-center bg-[#070b13] border border-gray-800 rounded-lg p-1 text-xs">
-              {[1, 3, 5, 7].map((days) => (
+              {[3, 7, 10, 14].map((days) => (
                 <button
                   key={days}
                   onClick={() => setDaysAhead(days)}

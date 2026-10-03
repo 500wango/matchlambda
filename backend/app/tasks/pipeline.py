@@ -182,20 +182,32 @@ def hourly_pipeline_task():
 
 async def run_hourly_pipeline():
     async with AsyncSessionLocal() as session:
-        stmt = select(League.id).where(League.active == True)
+        stmt = select(League).where(League.active == True)
         leagues = (await session.execute(stmt)).scalars().all()
     
-    # 1. Fetch live odds if provider configured
+    # 1. Fetch live real fixtures & odds for all active leagues from The Odds API if configured
     if settings.THE_ODDS_API_KEY:
         from app.etl.odds_api import OddsApiClient
         client = OddsApiClient()
-        events = await client.fetch_epl_odds(bookmakers="pinnacle", markets="h2h")
-        async with AsyncSessionLocal() as session:
-            for ev in events:
-                await client.ingest_odds_event(session, ev, target_bookmaker="pinnacle")
+        for league in leagues:
+            try:
+                events = await client.fetch_league_odds(league_id=league.id)
+                if events:
+                    async with AsyncSessionLocal() as session:
+                        for ev in events:
+                            await client.ingest_odds_event(
+                                session=session,
+                                event=ev,
+                                league_id=league.id,
+                                league_country=league.country,
+                                target_bookmaker="pinnacle",
+                            )
+            except Exception as e:
+                print(f"Live fetch notice for {league.id}: {e}")
 
     # 2. Train model and refresh predictions for all supported leagues
-    for lid in leagues:
+    for league in leagues:
+        lid = league.id
         try:
             model_param = await run_model_training_async(lid)
             async with AsyncSessionLocal() as session:
