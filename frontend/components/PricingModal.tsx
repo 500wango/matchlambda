@@ -66,6 +66,16 @@ export const PricingModal: React.FC<PricingModalProps> = ({
     };
   }, [activeOrder, onSuccessPayment]);
 
+  // Esc key listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleCheckout = async () => {
@@ -99,16 +109,6 @@ export const PricingModal: React.FC<PricingModalProps> = ({
       setLoading(false);
     }
   };
-
-  // Esc key listener
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
 
   return (
     <div
