@@ -168,12 +168,16 @@ async def get_fixtures(
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
-    if league_id is not None and league_id not in SUPPORTED_LEAGUES:
-        raise AppException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            code="VALIDATION_ERROR",
-            message=f"Unsupported league_id '{league_id}'. Supported: {', '.join(sorted(SUPPORTED_LEAGUES))}",
-        )
+    if league_id is not None:
+        from app.models import League
+        stmt_chk = select(League.id).where(League.id == league_id, League.active == True)
+        valid_league = (await db.execute(stmt_chk)).scalar_one_or_none()
+        if not valid_league:
+            raise AppException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                code="VALIDATION_ERROR",
+                message=f"Unsupported league_id '{league_id}'.",
+            )
 
     # Check has_value filter access
     if has_value is not None:

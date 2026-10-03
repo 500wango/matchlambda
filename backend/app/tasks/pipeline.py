@@ -181,7 +181,9 @@ def hourly_pipeline_task():
 
 
 async def run_hourly_pipeline():
-    leagues = ["EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1"]
+    async with AsyncSessionLocal() as session:
+        stmt = select(League.id).where(League.active == True)
+        leagues = (await session.execute(stmt)).scalars().all()
     
     # 1. Fetch live odds if provider configured
     if settings.THE_ODDS_API_KEY:

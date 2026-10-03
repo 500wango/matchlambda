@@ -10,18 +10,49 @@ import { AnalysisModal } from "@/components/AnalysisModal";
 import { apiRequest, setAuthToken } from "@/lib/api";
 import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle, Trophy } from "lucide-react";
 
-const LEAGUES = [
-  { id: "EPL", name: "Premier League", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
-  { id: "LA_LIGA", name: "La Liga", country: "Spain", badge: "🇪🇸" },
-  { id: "SERIE_A", name: "Serie A", country: "Italy", badge: "🇮🇹" },
-  { id: "BUNDESLIGA", name: "Bundesliga", country: "Germany", badge: "🇩🇪" },
-  { id: "LIGUE_1", name: "Ligue 1", country: "France", badge: "🇫🇷" },
+const LEAGUE_CATEGORIES = [
+  {
+    category: "五大联赛",
+    leagues: [
+      { id: "EPL", name: "Premier League", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
+      { id: "LA_LIGA", name: "La Liga", country: "Spain", badge: "🇪🇸" },
+      { id: "SERIE_A", name: "Serie A", country: "Italy", badge: "🇮🇹" },
+      { id: "BUNDESLIGA", name: "Bundesliga", country: "Germany", badge: "🇩🇪" },
+      { id: "LIGUE_1", name: "Ligue 1", country: "France", badge: "🇫🇷" },
+    ],
+  },
+  {
+    category: "欧洲杯赛",
+    leagues: [
+      { id: "UCL", name: "Champions League", country: "Europe", badge: "⭐" },
+      { id: "UEL", name: "Europa League", country: "Europe", badge: "🏆" },
+    ],
+  },
+  {
+    category: "欧洲主要联赛",
+    leagues: [
+      { id: "CHAMPIONSHIP", name: "Championship", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
+      { id: "EREDIVISIE", name: "Eredivisie", country: "Netherlands", badge: "🇳🇱" },
+      { id: "PRIMEIRA_LIGA", name: "Primeira Liga", country: "Portugal", badge: "🇵🇹" },
+    ],
+  },
+  {
+    category: "美洲及全球",
+    leagues: [
+      { id: "MLS", name: "MLS", country: "USA", badge: "🇺🇸" },
+      { id: "BRASILEIRAO", name: "Brasileirão", country: "Brazil", badge: "🇧🇷" },
+      { id: "SAUDI_PRO_LEAGUE", name: "Saudi Pro League", country: "Saudi Arabia", badge: "🇸🇦" },
+    ],
+  },
 ];
+
+const ALL_LEAGUES = LEAGUE_CATEGORIES.flatMap((c) => c.leagues);
 
 function HomeContent() {
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any | null>(null);
   const [selectedLeague, setSelectedLeague] = useState<string>("EPL");
+  const [activeCategory, setActiveCategory] = useState<string>("五大联赛");
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
@@ -96,7 +127,7 @@ function HomeContent() {
   };
 
   const isAnalyst = user?.effective_plan === "ANALYST";
-  const currentLeagueObj = LEAGUES.find((l) => l.id === selectedLeague) || LEAGUES[0];
+  const currentLeagueObj = ALL_LEAGUES.find((l) => l.id === selectedLeague) || ALL_LEAGUES[0];
 
   return (
     <div className="min-h-screen flex flex-col bg-[#080c14] text-gray-100">
@@ -108,26 +139,52 @@ function HomeContent() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* League Selector Tabs */}
-        <div className="flex items-center space-x-2 overflow-x-auto pb-2 border-b border-gray-800/80 scrollbar-none">
-          {LEAGUES.map((league) => {
-            const isActive = selectedLeague === league.id;
-            return (
-              <button
-                key={league.id}
-                onClick={() => setSelectedLeague(league.id)}
-                className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-medium text-xs whitespace-nowrap transition ${
-                  isActive
-                    ? "bg-blue-600 text-white font-bold shadow-lg shadow-blue-500/20 border border-blue-400/30"
-                    : "bg-[#0d121f] text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-800/80"
-                }`}
-              >
-                <span className="text-base">{league.badge}</span>
-                <span>{league.name}</span>
-                <span className="text-[10px] opacity-75 font-mono">({league.id})</span>
-              </button>
-            );
-          })}
+        {/* League Selector Group */}
+        <div className="space-y-3 pb-3 border-b border-gray-800/80">
+          {/* Category Tabs */}
+          <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none">
+            {LEAGUE_CATEGORIES.map((cat) => {
+              const isCatActive = cat.category === activeCategory;
+              return (
+                <button
+                  key={cat.category}
+                  onClick={() => {
+                    setActiveCategory(cat.category);
+                    setSelectedLeague(cat.leagues[0].id);
+                  }}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
+                    isCatActive
+                      ? "text-blue-400 bg-blue-950/60 border border-blue-600/40"
+                      : "text-gray-400 hover:text-gray-200 bg-[#0d121f] border border-gray-800/60"
+                  }`}
+                >
+                  {cat.category}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* League Pills for Active Category */}
+          <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none">
+            {(LEAGUE_CATEGORIES.find((c) => c.category === activeCategory)?.leagues || ALL_LEAGUES).map((league) => {
+              const isActive = selectedLeague === league.id;
+              return (
+                <button
+                  key={league.id}
+                  onClick={() => setSelectedLeague(league.id)}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl font-medium text-xs whitespace-nowrap transition ${
+                    isActive
+                      ? "bg-blue-600 text-white font-bold shadow-lg shadow-blue-500/20 border border-blue-400/30"
+                      : "bg-[#0d121f] text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-800/80"
+                  }`}
+                >
+                  <span className="text-base">{league.badge}</span>
+                  <span>{league.name}</span>
+                  <span className="text-[10px] opacity-75 font-mono">({league.id})</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Hero Banner */}
