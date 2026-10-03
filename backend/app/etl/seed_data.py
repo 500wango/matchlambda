@@ -15,6 +15,11 @@ LEAGUES = [
     # UEFA Continental Competitions
     ("UCL", "UEFA Champions League", "Europe", True),
     ("UEL", "UEFA Europa League", "Europe", True),
+    # Nordic & Central European Leagues (瑞超, 挪超, 丹麦超, 奥甲)
+    ("ALLSVENSKAN", "Allsvenskan", "Sweden", True),
+    ("ELITESERIEN", "Eliteserien", "Norway", True),
+    ("SUPERLIGA", "Superliga", "Denmark", True),
+    ("AUSTRIAN_BUNDESLIGA", "Austrian Bundesliga", "Austria", True),
     # Other Major European Leagues
     ("CHAMPIONSHIP", "Championship", "England", True),
     ("EREDIVISIE", "Eredivisie", "Netherlands", True),
@@ -86,6 +91,38 @@ TEAMS = [
     ("nice", "Nice", "France"),
     ("lyon", "Lyon", "France"),
     ("marseille", "Marseille", "France"),
+
+    # Allsvenskan (瑞超 - Sweden)
+    ("malmo", "Malmö FF", "Sweden"),
+    ("djurgarden", "Djurgårdens IF", "Sweden"),
+    ("hammarby", "Hammarby IF", "Sweden"),
+    ("aik", "AIK", "Sweden"),
+    ("elfsborg", "IF Elfsborg", "Sweden"),
+    ("hacken", "BK Häcken", "Sweden"),
+
+    # Eliteserien (挪超 - Norway)
+    ("bodo-glimt", "Bodø/Glimt", "Norway"),
+    ("brann", "SK Brann", "Norway"),
+    ("rosenborg", "Rosenborg BK", "Norway"),
+    ("molde", "Molde FK", "Norway"),
+    ("viking", "Viking FK", "Norway"),
+    ("tromso", "Tromsø IL", "Norway"),
+
+    # Superliga (丹麦超 - Denmark)
+    ("copenhagen", "FC Copenhagen", "Denmark"),
+    ("midtjylland", "FC Midtjylland", "Denmark"),
+    ("brondby", "Brøndby IF", "Denmark"),
+    ("aarhus", "AGF Aarhus", "Denmark"),
+    ("nordsjaelland", "FC Nordsjælland", "Denmark"),
+    ("silkeborg", "Silkeborg IF", "Denmark"),
+
+    # Austrian Bundesliga (奥甲/奥超 - Austria)
+    ("salzburg", "Red Bull Salzburg", "Austria"),
+    ("sturm-graz", "SK Sturm Graz", "Austria"),
+    ("rapid-wien", "Rapid Wien", "Austria"),
+    ("austria-wien", "Austria Wien", "Austria"),
+    ("lask", "LASK", "Austria"),
+    ("wolfsberger", "Wolfsberger AC", "Austria"),
 
     # English Championship
     ("leeds", "Leeds United", "England"),
@@ -161,6 +198,15 @@ CONFIRMED_ALIASES = [
     ("the_odds_api", None, "PSG", "France", "psg"),
     ("the_odds_api", None, "AS Monaco", "France", "monaco"),
     ("football_data", None, "Paris Saint Germain", "France", "psg"),
+    # Nordic & Central European Aliases
+    ("the_odds_api", None, "Malmo FF", "Sweden", "malmo"),
+    ("the_odds_api", None, "Djurgardens IF", "Sweden", "djurgarden"),
+    ("the_odds_api", None, "Bodo Glimt", "Norway", "bodo-glimt"),
+    ("the_odds_api", None, "Rosenborg", "Norway", "rosenborg"),
+    ("the_odds_api", None, "FC Copenhagen", "Denmark", "copenhagen"),
+    ("the_odds_api", None, "Brondby", "Denmark", "brondby"),
+    ("the_odds_api", None, "RB Salzburg", "Austria", "salzburg"),
+    ("the_odds_api", None, "Sturm Graz", "Austria", "sturm-graz"),
     # Other International Aliases
     ("the_odds_api", None, "Leeds", "England", "leeds"),
     ("the_odds_api", None, "Burnley FC", "England", "burnley"),
@@ -173,7 +219,7 @@ CONFIRMED_ALIASES = [
     ("the_odds_api", None, "Al Hilal", "Saudi Arabia", "al-hilal"),
 ]
 
-# Historical completed matches across all leagues
+# Historical completed matches across all 17 leagues
 HISTORICAL_MATCHES = [
     # EPL Historical
     ("EPL_2425_001", "EPL", "2024-08-16T19:00:00Z", "manchester-united", "fulham", 1, 0, "2024-08-16T21:00:00Z"),
@@ -254,6 +300,46 @@ HISTORICAL_MATCHES = [
     ("UEL_2425_004", "UEL", "2024-10-03T16:45:00Z", "lazio", "nice", 4, 1, "2024-10-03T18:45:00Z"),
     ("UEL_2425_005", "UEL", "2024-10-03T19:00:00Z", "porto", "manchester-united", 3, 3, "2024-10-03T21:00:00Z"),
     ("UEL_2425_006", "UEL", "2024-10-03T19:00:00Z", "athletic-club", "az-alkmaar", 2, 0, "2024-10-03T21:00:00Z"),
+
+    # Allsvenskan (瑞超) Historical
+    ("ALL_2425_001", "ALLSVENSKAN", "2024-08-10T15:00:00Z", "malmo", "hammarby", 2, 1, "2024-08-10T17:00:00Z"),
+    ("ALL_2425_002", "ALLSVENSKAN", "2024-08-11T13:00:00Z", "djurgarden", "aik", 1, 0, "2024-08-11T15:00:00Z"),
+    ("ALL_2425_003", "ALLSVENSKAN", "2024-08-11T15:30:00Z", "elfsborg", "hacken", 3, 1, "2024-08-11T17:30:00Z"),
+    ("ALL_2425_004", "ALLSVENSKAN", "2024-08-18T13:00:00Z", "aik", "malmo", 0, 0, "2024-08-18T15:00:00Z"),
+    ("ALL_2425_005", "ALLSVENSKAN", "2024-08-18T15:30:00Z", "hammarby", "elfsborg", 2, 0, "2024-08-18T17:30:00Z"),
+    ("ALL_2425_006", "ALLSVENSKAN", "2024-08-25T13:00:00Z", "hacken", "djurgarden", 1, 2, "2024-08-25T15:00:00Z"),
+    ("ALL_2425_007", "ALLSVENSKAN", "2024-09-01T13:00:00Z", "malmo", "djurgarden", 4, 0, "2024-09-01T15:00:00Z"),
+    ("ALL_2425_008", "ALLSVENSKAN", "2024-09-01T15:30:00Z", "hammarby", "aik", 2, 1, "2024-09-01T17:30:00Z"),
+
+    # Eliteserien (挪超) Historical
+    ("ELI_2425_001", "ELITESERIEN", "2024-08-10T16:00:00Z", "bodo-glimt", "molde", 3, 1, "2024-08-10T18:00:00Z"),
+    ("ELI_2425_002", "ELITESERIEN", "2024-08-11T15:00:00Z", "brann", "viking", 2, 1, "2024-08-11T17:00:00Z"),
+    ("ELI_2425_003", "ELITESERIEN", "2024-08-11T17:15:00Z", "rosenborg", "tromso", 1, 0, "2024-08-11T19:15:00Z"),
+    ("ELI_2425_004", "ELITESERIEN", "2024-08-18T15:00:00Z", "molde", "brann", 1, 2, "2024-08-18T17:00:00Z"),
+    ("ELI_2425_005", "ELITESERIEN", "2024-08-18T17:15:00Z", "viking", "rosenborg", 2, 1, "2024-08-18T19:15:00Z"),
+    ("ELI_2425_006", "ELITESERIEN", "2024-08-25T15:00:00Z", "tromso", "bodo-glimt", 0, 2, "2024-08-25T17:00:00Z"),
+    ("ELI_2425_007", "ELITESERIEN", "2024-09-01T15:00:00Z", "bodo-glimt", "brann", 1, 1, "2024-09-01T17:00:00Z"),
+    ("ELI_2425_008", "ELITESERIEN", "2024-09-01T17:15:00Z", "rosenborg", "molde", 2, 1, "2024-09-01T19:15:00Z"),
+
+    # Superliga (丹麦超) Historical
+    ("SUP_2425_001", "SUPERLIGA", "2024-08-09T17:00:00Z", "copenhagen", "aarhus", 3, 2, "2024-08-09T19:00:00Z"),
+    ("SUP_2425_002", "SUPERLIGA", "2024-08-11T14:00:00Z", "midtjylland", "nordsjaelland", 2, 0, "2024-08-11T16:00:00Z"),
+    ("SUP_2425_003", "SUPERLIGA", "2024-08-11T16:00:00Z", "brondby", "silkeborg", 1, 1, "2024-08-11T18:00:00Z"),
+    ("SUP_2425_004", "SUPERLIGA", "2024-08-18T14:00:00Z", "nordsjaelland", "copenhagen", 1, 1, "2024-08-18T16:00:00Z"),
+    ("SUP_2425_005", "SUPERLIGA", "2024-08-18T16:00:00Z", "aarhus", "brondby", 0, 1, "2024-08-18T18:00:00Z"),
+    ("SUP_2425_006", "SUPERLIGA", "2024-08-25T14:00:00Z", "silkeborg", "midtjylland", 1, 3, "2024-08-25T16:00:00Z"),
+    ("SUP_2425_007", "SUPERLIGA", "2024-09-01T14:00:00Z", "copenhagen", "brondby", 2, 1, "2024-09-01T16:00:00Z"),
+    ("SUP_2425_008", "SUPERLIGA", "2024-09-01T16:00:00Z", "midtjylland", "aarhus", 2, 0, "2024-09-01T18:00:00Z"),
+
+    # Austrian Bundesliga (奥甲/奥超) Historical
+    ("AB_2425_001", "AUSTRIAN_BUNDESLIGA", "2024-08-03T15:00:00Z", "salzburg", "austria-wien", 2, 0, "2024-08-03T17:00:00Z"),
+    ("AB_2425_002", "AUSTRIAN_BUNDESLIGA", "2024-08-04T15:00:00Z", "sturm-graz", "rapid-wien", 1, 0, "2024-08-04T17:00:00Z"),
+    ("AB_2425_003", "AUSTRIAN_BUNDESLIGA", "2024-08-04T15:00:00Z", "lask", "wolfsberger", 1, 2, "2024-08-04T17:00:00Z"),
+    ("AB_2425_004", "AUSTRIAN_BUNDESLIGA", "2024-08-10T17:30:00Z", "rapid-wien", "salzburg", 1, 1, "2024-08-10T19:30:00Z"),
+    ("AB_2425_005", "AUSTRIAN_BUNDESLIGA", "2024-08-11T15:00:00Z", "austria-wien", "lask", 2, 1, "2024-08-11T17:00:00Z"),
+    ("AB_2425_006", "AUSTRIAN_BUNDESLIGA", "2024-08-17T17:30:00Z", "wolfsberger", "sturm-graz", 0, 2, "2024-08-17T19:30:00Z"),
+    ("AB_2425_007", "AUSTRIAN_BUNDESLIGA", "2024-08-24T17:30:00Z", "salzburg", "sturm-graz", 2, 1, "2024-08-24T19:30:00Z"),
+    ("AB_2425_008", "AUSTRIAN_BUNDESLIGA", "2024-08-25T15:00:00Z", "rapid-wien", "austria-wien", 2, 1, "2024-08-25T17:00:00Z"),
 
     # Championship Historical
     ("CH_2425_001", "CHAMPIONSHIP", "2024-08-10T11:30:00Z", "leeds", "norwich", 3, 3, "2024-08-10T13:30:00Z"),
@@ -378,7 +464,7 @@ async def seed_database():
                     result_available_at=res_avail,
                 ))
 
-        # 5. Scheduled Matches across all 13 leagues
+        # 5. Scheduled Matches across all 17 leagues
         now = datetime.now(timezone.utc)
         scheduled_fixtures = [
             # EPL
@@ -414,6 +500,26 @@ async def seed_database():
             ("UEL_DEMO_001", "UEL", now + timedelta(days=1, hours=6), "manchester-united", "tottenham"),
             ("UEL_DEMO_002", "UEL", now + timedelta(days=2, hours=4), "roma", "athletic-club"),
             ("UEL_DEMO_003", "UEL", now + timedelta(days=3, hours=3), "lazio", "nice"),
+
+            # Allsvenskan (瑞超)
+            ("ALL_DEMO_001", "ALLSVENSKAN", now + timedelta(days=1, hours=3), "malmo", "djurgarden"),
+            ("ALL_DEMO_002", "ALLSVENSKAN", now + timedelta(days=2, hours=1), "hammarby", "aik"),
+            ("ALL_DEMO_003", "ALLSVENSKAN", now + timedelta(days=3, hours=2), "elfsborg", "hacken"),
+
+            # Eliteserien (挪超)
+            ("ELI_DEMO_001", "ELITESERIEN", now + timedelta(days=1, hours=4), "bodo-glimt", "brann"),
+            ("ELI_DEMO_002", "ELITESERIEN", now + timedelta(days=2, hours=2), "rosenborg", "molde"),
+            ("ELI_DEMO_003", "ELITESERIEN", now + timedelta(days=3, hours=3), "viking", "tromso"),
+
+            # Superliga (丹麦超)
+            ("SUP_DEMO_001", "SUPERLIGA", now + timedelta(days=1, hours=2), "copenhagen", "midtjylland"),
+            ("SUP_DEMO_002", "SUPERLIGA", now + timedelta(days=2, hours=4), "brondby", "aarhus"),
+            ("SUP_DEMO_003", "SUPERLIGA", now + timedelta(days=3, hours=1), "nordsjaelland", "silkeborg"),
+
+            # Austrian Bundesliga (奥甲/奥超)
+            ("AB_DEMO_001", "AUSTRIAN_BUNDESLIGA", now + timedelta(days=1, hours=1), "salzburg", "sturm-graz"),
+            ("AB_DEMO_002", "AUSTRIAN_BUNDESLIGA", now + timedelta(days=2, hours=3), "rapid-wien", "austria-wien"),
+            ("AB_DEMO_003", "AUSTRIAN_BUNDESLIGA", now + timedelta(days=3, hours=4), "lask", "wolfsberger"),
 
             # Championship
             ("CH_DEMO_001", "CHAMPIONSHIP", now + timedelta(days=1, hours=2), "leeds", "sheffield-united"),
@@ -457,7 +563,7 @@ async def seed_database():
                 ))
 
         await session.commit()
-        print("Database seeded with all 13 world & European leagues successfully.")
+        print("Database seeded with all 17 leagues including Nordic & Central European leagues successfully.")
 
 
 if __name__ == "__main__":

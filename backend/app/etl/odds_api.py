@@ -13,27 +13,48 @@ from app.math.shin import calculate_shin_probabilities
 
 logger = logging.getLogger(__name__)
 
-THE_ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports/soccer_epl"
+ODDS_API_SPORT_KEYS = {
+    "EPL": "soccer_epl",
+    "LA_LIGA": "soccer_spain_la_liga",
+    "SERIE_A": "soccer_italy_serie_a",
+    "BUNDESLIGA": "soccer_germany_bundesliga",
+    "LIGUE_1": "soccer_france_ligue_one",
+    "UCL": "soccer_uefa_champs_league",
+    "UEL": "soccer_uefa_europa_league",
+    "ALLSVENSKAN": "soccer_sweden_allsvenskan",
+    "ELITESERIEN": "soccer_norway_eliteserien",
+    "SUPERLIGA": "soccer_denmark_superliga",
+    "AUSTRIAN_BUNDESLIGA": "soccer_austria_bundesliga",
+    "CHAMPIONSHIP": "soccer_efl_champ",
+    "EREDIVISIE": "soccer_netherlands_eredivisie",
+    "PRIMEIRA_LIGA": "soccer_portugal_primeira_liga",
+    "MLS": "soccer_usa_mls",
+    "BRASILEIRAO": "soccer_brazil_campeonato",
+    "SAUDI_PRO_LEAGUE": "soccer_saudi_arabia_pro_league",
+}
+
+THE_ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports"
 
 
 class OddsApiClient:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.THE_ODDS_API_KEY
 
-    async def fetch_epl_odds(
+    async def fetch_league_odds(
         self,
+        league_id: str = "EPL",
         bookmakers: str = "pinnacle",
         markets: str = "h2h",
     ) -> List[Dict[str, Any]]:
         """
-        Fetches active EPL h2h odds from The Odds API.
-        Adheres strictly to docs/06_DATA_PIPELINE_ETL.md.
+        Fetches active h2h odds from The Odds API for any supported league.
         """
         if not self.api_key:
             logger.info("THE_ODDS_API_KEY is not configured; skipping external fetch.")
             return []
 
-        url = f"{THE_ODDS_API_BASE}/odds/"
+        sport_key = ODDS_API_SPORT_KEYS.get(league_id, "soccer_epl")
+        url = f"{THE_ODDS_API_BASE}/{sport_key}/odds/"
         params = {
             "apiKey": self.api_key,
             "regions": "eu,uk",

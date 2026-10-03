@@ -29,7 +29,16 @@ const LEAGUE_CATEGORIES = [
     ],
   },
   {
-    category: "欧洲主要联赛",
+    category: "北欧与中欧联赛",
+    leagues: [
+      { id: "ALLSVENSKAN", name: "瑞超 (Allsvenskan)", country: "Sweden", badge: "🇸🇪" },
+      { id: "ELITESERIEN", name: "挪超 (Eliteserien)", country: "Norway", badge: "🇳🇴" },
+      { id: "SUPERLIGA", name: "丹麦超 (Superliga)", country: "Denmark", badge: "🇩🇰" },
+      { id: "AUSTRIAN_BUNDESLIGA", name: "奥甲/奥超 (Bundesliga)", country: "Austria", badge: "🇦🇹" },
+    ],
+  },
+  {
+    category: "欧洲其他主要联赛",
     leagues: [
       { id: "CHAMPIONSHIP", name: "Championship", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
       { id: "EREDIVISIE", name: "Eredivisie", country: "Netherlands", badge: "🇳🇱" },
@@ -52,7 +61,7 @@ function HomeContent() {
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any | null>(null);
   const [selectedLeague, setSelectedLeague] = useState<string>("EPL");
-  const [activeCategory, setActiveCategory] = useState<string>("五大联赛");
+  const [activeCategory, setActiveCategory] = useState<string>("全部联赛");
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
@@ -143,6 +152,16 @@ function HomeContent() {
         <div className="space-y-3 pb-3 border-b border-gray-800/80">
           {/* Category Tabs */}
           <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none">
+            <button
+              onClick={() => setActiveCategory("全部联赛")}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
+                activeCategory === "全部联赛"
+                  ? "text-blue-400 bg-blue-950/60 border border-blue-600/40"
+                  : "text-gray-400 hover:text-gray-200 bg-[#0d121f] border border-gray-800/60"
+              }`}
+            >
+              全部联赛 ({ALL_LEAGUES.length})
+            </button>
             {LEAGUE_CATEGORIES.map((cat) => {
               const isCatActive = cat.category === activeCategory;
               return (
@@ -166,7 +185,7 @@ function HomeContent() {
 
           {/* League Pills for Active Category */}
           <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none">
-            {(LEAGUE_CATEGORIES.find((c) => c.category === activeCategory)?.leagues || ALL_LEAGUES).map((league) => {
+            {(activeCategory === "全部联赛" ? ALL_LEAGUES : (LEAGUE_CATEGORIES.find((c) => c.category === activeCategory)?.leagues || ALL_LEAGUES)).map((league) => {
               const isActive = selectedLeague === league.id;
               return (
                 <button
