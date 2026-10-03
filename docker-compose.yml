@@ -92,6 +92,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     command: npm run dev -- --hostname 0.0.0.0
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     ports:
       - "127.0.0.1:3000:3000"
     environment:

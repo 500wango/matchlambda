@@ -8,18 +8,27 @@ import { AuthModal } from "@/components/AuthModal";
 import { PricingModal } from "@/components/PricingModal";
 import { AnalysisModal } from "@/components/AnalysisModal";
 import { apiRequest, setAuthToken } from "@/lib/api";
-import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle } from "lucide-react";
+import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle, Trophy } from "lucide-react";
+
+const LEAGUES = [
+  { id: "EPL", name: "Premier League", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
+  { id: "LA_LIGA", name: "La Liga", country: "Spain", badge: "🇪🇸" },
+  { id: "SERIE_A", name: "Serie A", country: "Italy", badge: "🇮🇹" },
+  { id: "BUNDESLIGA", name: "Bundesliga", country: "Germany", badge: "🇩🇪" },
+  { id: "LIGUE_1", name: "Ligue 1", country: "France", badge: "🇫🇷" },
+];
 
 function HomeContent() {
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any | null>(null);
+  const [selectedLeague, setSelectedLeague] = useState<string>("EPL");
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   // Filters
-  const [daysAhead, setDaysAhead] = useState<number>(3);
+  const [daysAhead, setDaysAhead] = useState<number>(5);
   const [valueOnly, setValueOnly] = useState<boolean>(false);
 
   // Modals
@@ -49,7 +58,7 @@ function HomeContent() {
     setLoading(true);
     setError(null);
     try {
-      let query = `/matches/fixtures?league_id=EPL&days_ahead=${daysAhead}&limit=50&offset=0`;
+      let query = `/matches/fixtures?league_id=${selectedLeague}&days_ahead=${daysAhead}&limit=50&offset=0`;
       if (valueOnly && user?.effective_plan === "ANALYST") {
         query += "&has_value=true";
       }
@@ -61,7 +70,7 @@ function HomeContent() {
     } finally {
       setLoading(false);
     }
-  }, [daysAhead, valueOnly, user]);
+  }, [selectedLeague, daysAhead, valueOnly, user]);
 
   useEffect(() => {
     fetchUser();
@@ -87,6 +96,7 @@ function HomeContent() {
   };
 
   const isAnalyst = user?.effective_plan === "ANALYST";
+  const currentLeagueObj = LEAGUES.find((l) => l.id === selectedLeague) || LEAGUES[0];
 
   return (
     <div className="min-h-screen flex flex-col bg-[#080c14] text-gray-100">
@@ -98,6 +108,28 @@ function HomeContent() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* League Selector Tabs */}
+        <div className="flex items-center space-x-2 overflow-x-auto pb-2 border-b border-gray-800/80 scrollbar-none">
+          {LEAGUES.map((league) => {
+            const isActive = selectedLeague === league.id;
+            return (
+              <button
+                key={league.id}
+                onClick={() => setSelectedLeague(league.id)}
+                className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl font-medium text-xs whitespace-nowrap transition ${
+                  isActive
+                    ? "bg-blue-600 text-white font-bold shadow-lg shadow-blue-500/20 border border-blue-400/30"
+                    : "bg-[#0d121f] text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-800/80"
+                }`}
+              >
+                <span className="text-base">{league.badge}</span>
+                <span>{league.name}</span>
+                <span className="text-[10px] opacity-75 font-mono">({league.id})</span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Hero Banner */}
         <div className="relative rounded-2xl bg-gradient-to-r from-blue-900/40 via-indigo-950/30 to-purple-900/20 border border-blue-500/20 p-6 sm:p-8 overflow-hidden shadow-2xl">
           <div className="relative z-10 max-w-2xl">
@@ -105,12 +137,13 @@ function HomeContent() {
               <Sparkles className="w-3.5 h-3.5" />
               <span>Dixon–Coles Time-Weighted Poisson Model</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
-              Pre-Match EPL Probabilities & Market Discrepancies
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight flex items-center gap-3">
+              <span>{currentLeagueObj.badge}</span>
+              <span>{currentLeagueObj.name} Probability Engine</span>
             </h1>
             <p className="text-sm text-gray-400 mt-2 leading-relaxed">
               Reproducible goal expectations, full 6×6 score distribution tail matrices, and Shin
-              de-juiced bookmaker comparisons for Premier League fixtures.
+              de-juiced bookmaker comparisons for {currentLeagueObj.name} fixtures.
             </p>
           </div>
 
@@ -120,8 +153,8 @@ function HomeContent() {
               <span className="text-white font-bold">ξ = 0.0018 / day</span>
             </div>
             <div className="border-l border-gray-800 pl-4">
-              <span className="text-gray-500 block text-[10px]">REFRESH INTERVALS</span>
-              <span className="text-white font-bold">T−12h · T−2h · T−45m</span>
+              <span className="text-gray-500 block text-[10px]">ACTIVE LEAGUE</span>
+              <span className="text-white font-bold">{currentLeagueObj.name}</span>
             </div>
             <div className="border-l border-gray-800 pl-4">
               <span className="text-gray-500 block text-[10px]">TARGET MARKET</span>
@@ -182,7 +215,10 @@ function HomeContent() {
         {/* Fixtures Grid */}
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-white tracking-tight">Scheduled EPL Matches</h2>
+            <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              <span>{currentLeagueObj.badge}</span>
+              <span>Scheduled {currentLeagueObj.name} Matches</span>
+            </h2>
             <span className="text-xs font-mono text-gray-400">
               Showing {fixtures.length} of {total} fixtures
             </span>
@@ -200,7 +236,7 @@ function HomeContent() {
             </div>
           ) : fixtures.length === 0 ? (
             <div className="p-12 text-center bg-[#0d121f] border border-gray-800 rounded-xl">
-              <p className="text-sm text-gray-400">No fixtures found matching current criteria.</p>
+              <p className="text-sm text-gray-400">No fixtures found matching current criteria for {currentLeagueObj.name}.</p>
               {valueOnly && (
                 <button
                   onClick={() => setValueOnly(false)}
@@ -225,7 +261,7 @@ function HomeContent() {
           )}
         </div>
 
-        {/* Risk Disclaimer strictly according to PRD section 1 & 4 */}
+        {/* Risk Disclaimer */}
         <div className="p-4 rounded-xl bg-gray-900/40 border border-gray-800 text-[11px] text-gray-500 leading-relaxed font-mono">
           <strong className="text-gray-400 uppercase">Analytical Disclaimer: </strong>
           MatchLambda estimates are generated via regulation-time Dixon–Coles Poisson modeling.

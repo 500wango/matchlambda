@@ -22,6 +22,22 @@ from app.math.ev import calculate_ev, calculate_half_kelly, has_value_signal
 
 router = APIRouter(prefix="/matches", tags=["Matches"])
 
+SUPPORTED_LEAGUES = {"EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1"}
+
+
+@router.get("/leagues")
+async def get_leagues(db: AsyncSession = Depends(get_db)):
+    """
+    Returns list of all active European leagues supported by the engine.
+    """
+    from app.models import League
+    stmt = select(League).where(League.active == True)
+    leagues = (await db.execute(stmt)).scalars().all()
+    return [
+        {"id": l.id, "name": l.name, "country": l.country}
+        for l in leagues
+    ]
+
 
 def build_outcomes(pred: Prediction, odds: OddsSnapshot) -> Tuple[List[OutcomeItem], bool]:
     # HOME, DRAW, AWAY in exact order
@@ -152,11 +168,11 @@ async def get_fixtures(
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
-    if league_id is not None and league_id != "EPL":
+    if league_id is not None and league_id not in SUPPORTED_LEAGUES:
         raise AppException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             code="VALIDATION_ERROR",
-            message="Only league_id 'EPL' is supported in this release.",
+            message=f"Unsupported league_id '{league_id}'. Supported: {', '.join(sorted(SUPPORTED_LEAGUES))}",
         )
 
     # Check has_value filter access

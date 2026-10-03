@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from sqlalchemy import select, and_, desc
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.celery import celery_app
 from app.models import League, Team, Match, OddsSnapshot, ModelParameter, Prediction
@@ -34,9 +35,12 @@ async def run_model_training_async(league_id: str = "EPL") -> ModelParameter:
         )
         matches = (await session.execute(stmt)).scalars().all()
 
-        # Get all team IDs
-        team_stmt = select(Team.id).where(Team.country == "England")
-        all_teams = (await session.execute(team_stmt)).scalars().all()
+        # Extract all participating teams for this league
+        team_set = set()
+        for m in matches:
+            team_set.add(m.home_team_id)
+            team_set.add(m.away_team_id)
+        all_teams = sorted(list(team_set))
 
         match_tuples = [
             (m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.match_date)
@@ -177,6 +181,8 @@ def hourly_pipeline_task():
 
 
 async def run_hourly_pipeline():
+    leagues = ["EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1"]
+    
     # 1. Fetch live odds if provider configured
     if settings.THE_ODDS_API_KEY:
         from app.etl.odds_api import OddsApiClient
@@ -186,13 +192,15 @@ async def run_hourly_pipeline():
             for ev in events:
                 await client.ingest_odds_event(session, ev, target_bookmaker="pinnacle")
 
-    # 2. Train model with latest finished matches
-    model_param = await run_model_training_async("EPL")
+    # 2. Train model and refresh predictions for all supported leagues
+    for lid in leagues:
+        try:
+            model_param = await run_model_training_async(lid)
+            async with AsyncSessionLocal() as session:
+                stmt = select(Match.id).where(Match.league_id == lid, Match.status == "SCHEDULED")
+                fixture_ids = (await session.execute(stmt)).scalars().all()
 
-    # 3. Refresh predictions for scheduled fixtures
-    async with AsyncSessionLocal() as session:
-        stmt = select(Match.id).where(Match.status == "SCHEDULED")
-        fixture_ids = (await session.execute(stmt)).scalars().all()
-
-    for fid in fixture_ids:
-        await generate_snapshots_and_predictions_async(fid, str(model_param.id))
+            for fid in fixture_ids:
+                await generate_snapshots_and_predictions_async(fid, str(model_param.id))
+        except Exception as e:
+            print(f"Pipeline note for league {lid}: {e}")

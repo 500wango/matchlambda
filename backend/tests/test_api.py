@@ -77,9 +77,13 @@ async def test_fixtures_access_and_filter():
             assert f0.get("comparison") is None
 
         # 2. Unsupported league -> 422
-        res = await client.get("/v1/matches/fixtures?league_id=LA_LIGA")
+        res = await client.get("/v1/matches/fixtures?league_id=UNKNOWN_LEAGUE")
         assert res.status_code == 422
         assert res.json()["error"]["code"] == "VALIDATION_ERROR"
+
+        # 2b. Newly supported league (LA_LIGA) -> 200
+        res = await client.get("/v1/matches/fixtures?league_id=LA_LIGA")
+        assert res.status_code == 200
 
         # 3. Supplying has_value anonymously -> 401
         res = await client.get("/v1/matches/fixtures?has_value=true")
