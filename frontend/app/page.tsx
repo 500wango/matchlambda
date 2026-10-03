@@ -10,26 +10,34 @@ import { AnalysisModal } from "@/components/AnalysisModal";
 import { apiRequest, setAuthToken } from "@/lib/api";
 import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle, Trophy } from "lucide-react";
 
-const LEAGUE_CATEGORIES = [
+interface LeagueOption {
+  id: string;
+  name: string;
+  country: string;
+  badge: string;
+}
+
+interface LeagueCategory {
+  category: string;
+  groupOption: LeagueOption;
+  leagues: LeagueOption[];
+}
+
+const LEAGUE_CATEGORIES: LeagueCategory[] = [
   {
     category: "五大联赛",
+    groupOption: { id: "TOP5", name: "全部五大联赛 (All Top 5)", country: "Europe", badge: "🏆" },
     leagues: [
-      { id: "EPL", name: "Premier League", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
-      { id: "LA_LIGA", name: "La Liga", country: "Spain", badge: "🇪🇸" },
-      { id: "SERIE_A", name: "Serie A", country: "Italy", badge: "🇮🇹" },
-      { id: "BUNDESLIGA", name: "Bundesliga", country: "Germany", badge: "🇩🇪" },
-      { id: "LIGUE_1", name: "Ligue 1", country: "France", badge: "🇫🇷" },
-    ],
-  },
-  {
-    category: "欧洲杯赛",
-    leagues: [
-      { id: "UCL", name: "Champions League", country: "Europe", badge: "⭐" },
-      { id: "UEL", name: "Europa League", country: "Europe", badge: "🏆" },
+      { id: "EPL", name: "Premier League (英超)", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
+      { id: "LA_LIGA", name: "La Liga (西甲)", country: "Spain", badge: "🇪🇸" },
+      { id: "SERIE_A", name: "Serie A (意甲)", country: "Italy", badge: "🇮🇹" },
+      { id: "BUNDESLIGA", name: "Bundesliga (德甲)", country: "Germany", badge: "🇩🇪" },
+      { id: "LIGUE_1", name: "Ligue 1 (法甲)", country: "France", badge: "🇫🇷" },
     ],
   },
   {
     category: "北欧与中欧联赛",
+    groupOption: { id: "NORDIC", name: "全部北欧与中欧", country: "Europe", badge: "❄️" },
     leagues: [
       { id: "ALLSVENSKAN", name: "瑞超 (Allsvenskan)", country: "Sweden", badge: "🇸🇪" },
       { id: "ELITESERIEN", name: "挪超 (Eliteserien)", country: "Norway", badge: "🇳🇴" },
@@ -39,29 +47,53 @@ const LEAGUE_CATEGORIES = [
   },
   {
     category: "欧洲其他主要联赛",
+    groupOption: { id: "EURO_OTHER", name: "全部其他主要联赛", country: "Europe", badge: "🌍" },
     leagues: [
-      { id: "CHAMPIONSHIP", name: "Championship", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
-      { id: "EREDIVISIE", name: "Eredivisie", country: "Netherlands", badge: "🇳🇱" },
-      { id: "PRIMEIRA_LIGA", name: "Primeira Liga", country: "Portugal", badge: "🇵🇹" },
+      { id: "CHAMPIONSHIP", name: "英冠 (Championship)", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
+      { id: "EREDIVISIE", name: "荷甲 (Eredivisie)", country: "Netherlands", badge: "🇳🇱" },
+      { id: "PRIMEIRA_LIGA", name: "葡超 (Primeira Liga)", country: "Portugal", badge: "🇵🇹" },
     ],
   },
   {
     category: "美洲及全球",
+    groupOption: { id: "GLOBAL", name: "全部美洲及全球", country: "Global", badge: "🌎" },
     leagues: [
-      { id: "MLS", name: "MLS", country: "USA", badge: "🇺🇸" },
-      { id: "BRASILEIRAO", name: "Brasileirão", country: "Brazil", badge: "🇧🇷" },
-      { id: "SAUDI_PRO_LEAGUE", name: "Saudi Pro League", country: "Saudi Arabia", badge: "🇸🇦" },
+      { id: "MLS", name: "美职联 (MLS)", country: "USA", badge: "🇺🇸" },
+      { id: "BRASILEIRAO", name: "巴西甲 (Brasileirão)", country: "Brazil", badge: "🇧🇷" },
+      { id: "SAUDI_PRO_LEAGUE", name: "沙特联 (Saudi Pro)", country: "Saudi Arabia", badge: "🇸🇦" },
+    ],
+  },
+  {
+    category: "欧洲杯赛",
+    groupOption: { id: "CUPS", name: "全部欧战杯赛", country: "Europe", badge: "⭐" },
+    leagues: [
+      { id: "UCL", name: "Champions League (欧冠)", country: "Europe", badge: "⭐" },
+      { id: "UEL", name: "Europa League (欧联)", country: "Europe", badge: "🏆" },
     ],
   },
 ];
 
-const ALL_LEAGUES = LEAGUE_CATEGORIES.flatMap((c) => c.leagues);
+const ALL_LEAGUES: LeagueOption[] = LEAGUE_CATEGORIES.flatMap((c) => c.leagues);
+
+const ALL_LEAGUE_MAP: Record<string, LeagueOption> = {
+  TOP5: { id: "TOP5", name: "五大联赛 (Top 5 Leagues)", country: "Europe", badge: "🏆" },
+  ALL: { id: "ALL", name: "全网所有联赛 (All 17 Leagues)", country: "Global", badge: "🌐" },
+  NORDIC: { id: "NORDIC", name: "北欧与中欧联赛", country: "Europe", badge: "❄️" },
+  CUPS: { id: "CUPS", name: "欧战顶级杯赛", country: "Europe", badge: "⭐" },
+  EURO_OTHER: { id: "EURO_OTHER", name: "欧洲其他主要联赛", country: "Europe", badge: "🌍" },
+  GLOBAL: { id: "GLOBAL", name: "美洲及全球联赛", country: "Global", badge: "🌎" },
+};
+for (const cat of LEAGUE_CATEGORIES) {
+  for (const l of cat.leagues) {
+    ALL_LEAGUE_MAP[l.id] = l;
+  }
+}
 
 function HomeContent() {
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any | null>(null);
-  const [selectedLeague, setSelectedLeague] = useState<string>("EPL");
-  const [activeCategory, setActiveCategory] = useState<string>("全部联赛");
+  const [selectedLeague, setSelectedLeague] = useState<string>("TOP5");
+  const [activeCategory, setActiveCategory] = useState<string>("五大联赛");
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
@@ -98,7 +130,10 @@ function HomeContent() {
     setLoading(true);
     setError(null);
     try {
-      let query = `/matches/fixtures?league_id=${selectedLeague}&days_ahead=${daysAhead}&limit=50&offset=0`;
+      let query = `/matches/fixtures?days_ahead=${daysAhead}&limit=50&offset=0`;
+      if (selectedLeague && selectedLeague !== "ALL") {
+        query += `&league_id=${selectedLeague}`;
+      }
       if (valueOnly && user?.effective_plan === "ANALYST") {
         query += "&has_value=true";
       }
@@ -136,7 +171,12 @@ function HomeContent() {
   };
 
   const isAnalyst = user?.effective_plan === "ANALYST";
-  const currentLeagueObj = ALL_LEAGUES.find((l) => l.id === selectedLeague) || ALL_LEAGUES[0];
+  const currentLeagueObj = ALL_LEAGUE_MAP[selectedLeague] || {
+    id: selectedLeague,
+    name: selectedLeague,
+    country: "Global",
+    badge: "⚽",
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#080c14] text-gray-100">
@@ -153,23 +193,39 @@ function HomeContent() {
           {/* Category Tabs */}
           <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none">
             <button
-              onClick={() => setActiveCategory("全部联赛")}
+              onClick={() => {
+                setActiveCategory("五大联赛");
+                setSelectedLeague("TOP5");
+              }}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
+                activeCategory === "五大联赛"
+                  ? "text-blue-400 bg-blue-950/60 border border-blue-600/40"
+                  : "text-gray-400 hover:text-gray-200 bg-[#0d121f] border border-gray-800/60"
+              }`}
+            >
+              🏆 五大联赛 (Top 5)
+            </button>
+            <button
+              onClick={() => {
+                setActiveCategory("全部联赛");
+                setSelectedLeague("ALL");
+              }}
               className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
                 activeCategory === "全部联赛"
                   ? "text-blue-400 bg-blue-950/60 border border-blue-600/40"
                   : "text-gray-400 hover:text-gray-200 bg-[#0d121f] border border-gray-800/60"
               }`}
             >
-              全部联赛 ({ALL_LEAGUES.length})
+              🌐 全部联赛 ({ALL_LEAGUES.length})
             </button>
-            {LEAGUE_CATEGORIES.map((cat) => {
+            {LEAGUE_CATEGORIES.filter((c) => c.category !== "五大联赛").map((cat) => {
               const isCatActive = cat.category === activeCategory;
               return (
                 <button
                   key={cat.category}
                   onClick={() => {
                     setActiveCategory(cat.category);
-                    setSelectedLeague(cat.leagues[0].id);
+                    setSelectedLeague(cat.groupOption.id);
                   }}
                   className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
                     isCatActive
@@ -185,24 +241,64 @@ function HomeContent() {
 
           {/* League Pills for Active Category */}
           <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none">
-            {(activeCategory === "全部联赛" ? ALL_LEAGUES : (LEAGUE_CATEGORIES.find((c) => c.category === activeCategory)?.leagues || ALL_LEAGUES)).map((league) => {
-              const isActive = selectedLeague === league.id;
-              return (
+            {activeCategory === "全部联赛" ? (
+              <>
                 <button
-                  key={league.id}
-                  onClick={() => setSelectedLeague(league.id)}
+                  onClick={() => setSelectedLeague("ALL")}
                   className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl font-medium text-xs whitespace-nowrap transition ${
-                    isActive
+                    selectedLeague === "ALL"
                       ? "bg-blue-600 text-white font-bold shadow-lg shadow-blue-500/20 border border-blue-400/30"
                       : "bg-[#0d121f] text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-800/80"
                   }`}
                 >
-                  <span className="text-base">{league.badge}</span>
-                  <span>{league.name}</span>
-                  <span className="text-[10px] opacity-75 font-mono">({league.id})</span>
+                  <span className="text-base">🌐</span>
+                  <span>全网所有赛事 (All 17 Leagues)</span>
                 </button>
-              );
-            })}
+                {ALL_LEAGUES.map((league) => {
+                  const isActive = selectedLeague === league.id;
+                  return (
+                    <button
+                      key={league.id}
+                      onClick={() => setSelectedLeague(league.id)}
+                      className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl font-medium text-xs whitespace-nowrap transition ${
+                        isActive
+                          ? "bg-blue-600 text-white font-bold shadow-lg shadow-blue-500/20 border border-blue-400/30"
+                          : "bg-[#0d121f] text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-800/80"
+                      }`}
+                    >
+                      <span className="text-base">{league.badge}</span>
+                      <span>{league.name}</span>
+                      <span className="text-[10px] opacity-75 font-mono">({league.id})</span>
+                    </button>
+                  );
+                })}
+              </>
+            ) : (
+              (() => {
+                const curCat =
+                  LEAGUE_CATEGORIES.find((c) => c.category === activeCategory) ||
+                  LEAGUE_CATEGORIES[0];
+                const list = [curCat.groupOption, ...curCat.leagues];
+                return list.map((league) => {
+                  const isActive = selectedLeague === league.id;
+                  return (
+                    <button
+                      key={league.id}
+                      onClick={() => setSelectedLeague(league.id)}
+                      className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl font-medium text-xs whitespace-nowrap transition ${
+                        isActive
+                          ? "bg-blue-600 text-white font-bold shadow-lg shadow-blue-500/20 border border-blue-400/30"
+                          : "bg-[#0d121f] text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-800/80"
+                      }`}
+                    >
+                      <span className="text-base">{league.badge}</span>
+                      <span>{league.name}</span>
+                      <span className="text-[10px] opacity-75 font-mono">({league.id})</span>
+                    </button>
+                  );
+                });
+              })()
+            )}
           </div>
         </div>
 

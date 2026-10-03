@@ -168,16 +168,40 @@ async def get_fixtures(
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
-    if league_id is not None:
-        from app.models import League
-        stmt_chk = select(League.id).where(League.id == league_id, League.active == True)
-        valid_league = (await db.execute(stmt_chk)).scalar_one_or_none()
-        if not valid_league:
-            raise AppException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                code="VALIDATION_ERROR",
-                message=f"Unsupported league_id '{league_id}'.",
-            )
+    TOP_5_LEAGUES = ["EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1"]
+    NORDIC_LEAGUES = ["ALLSVENSKAN", "ELITESERIEN", "SUPERLIGA", "AUSTRIAN_BUNDESLIGA"]
+    EURO_OTHER_LEAGUES = ["CHAMPIONSHIP", "EREDIVISIE", "PRIMEIRA_LIGA"]
+    GLOBAL_LEAGUES = ["MLS", "BRASILEIRAO", "SAUDI_PRO_LEAGUE"]
+    CUPS_LEAGUES = ["UCL", "UEL"]
+
+    filter_league_ids: Optional[List[str]] = None
+    if league_id is not None and league_id.strip():
+        lid_clean = league_id.strip().upper()
+        if lid_clean in ("ALL", "*", "ANY"):
+            filter_league_ids = None
+        elif lid_clean in ("TOP5", "TOP_5", "五大联赛"):
+            filter_league_ids = TOP_5_LEAGUES
+        elif lid_clean in ("NORDIC", "北欧与中欧联赛"):
+            filter_league_ids = NORDIC_LEAGUES
+        elif lid_clean in ("CUPS", "EUROPEAN_CUPS", "欧洲杯赛"):
+            filter_league_ids = CUPS_LEAGUES
+        elif lid_clean in ("EURO_OTHER", "欧洲其他主要联赛"):
+            filter_league_ids = EURO_OTHER_LEAGUES
+        elif lid_clean in ("GLOBAL", "美洲及全球"):
+            filter_league_ids = GLOBAL_LEAGUES
+        elif "," in lid_clean:
+            filter_league_ids = [x.strip() for x in lid_clean.split(",") if x.strip()]
+        else:
+            from app.models import League
+            stmt_chk = select(League.id).where(League.id == lid_clean, League.active == True)
+            valid_league = (await db.execute(stmt_chk)).scalar_one_or_none()
+            if not valid_league:
+                raise AppException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    code="VALIDATION_ERROR",
+                    message=f"Unsupported league_id '{league_id}'.",
+                )
+            filter_league_ids = [lid_clean]
 
     # Check has_value filter access
     if has_value is not None:
@@ -214,8 +238,8 @@ async def get_fixtures(
         )
     )
 
-    if league_id:
-        query = query.where(Match.league_id == league_id)
+    if filter_league_ids:
+        query = query.where(Match.league_id.in_(filter_league_ids))
 
     query = query.order_by(Match.match_date.asc(), Match.id.asc())
 

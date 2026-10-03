@@ -10,6 +10,26 @@ interface FixtureCardProps {
   onUpgrade: () => void;
 }
 
+const LEAGUE_LABELS: Record<string, { name: string; badge: string }> = {
+  EPL: { name: "英超 Premier League", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
+  LA_LIGA: { name: "西甲 La Liga", badge: "🇪🇸" },
+  SERIE_A: { name: "意甲 Serie A", badge: "🇮🇹" },
+  BUNDESLIGA: { name: "德甲 Bundesliga", badge: "🇩🇪" },
+  LIGUE_1: { name: "法甲 Ligue 1", badge: "🇫🇷" },
+  ALLSVENSKAN: { name: "瑞超 Allsvenskan", badge: "🇸🇪" },
+  ELITESERIEN: { name: "挪超 Eliteserien", badge: "🇳🇴" },
+  SUPERLIGA: { name: "丹麦超 Superliga", badge: "🇩🇰" },
+  AUSTRIAN_BUNDESLIGA: { name: "奥甲/奥超 Bundesliga", badge: "🇦🇹" },
+  CHAMPIONSHIP: { name: "英冠 Championship", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
+  EREDIVISIE: { name: "荷甲 Eredivisie", badge: "🇳🇱" },
+  PRIMEIRA_LIGA: { name: "葡超 Primeira Liga", badge: "🇵🇹" },
+  MLS: { name: "美职联 MLS", badge: "🇺🇸" },
+  BRASILEIRAO: { name: "巴西甲 Brasileirão", badge: "🇧🇷" },
+  SAUDI_PRO_LEAGUE: { name: "沙特联 Saudi Pro", badge: "🇸🇦" },
+  UCL: { name: "欧冠 Champions League", badge: "⭐" },
+  UEL: { name: "欧联 Europa League", badge: "🏆" },
+};
+
 export const FixtureCard: React.FC<FixtureCardProps> = ({
   fixture,
   isAnalyst,
@@ -30,12 +50,16 @@ export const FixtureCard: React.FC<FixtureCardProps> = ({
   const pred = fixture.prediction;
   const comp = fixture.comparison;
   const hasValue = comp?.has_value;
+  const leagueInfo = LEAGUE_LABELS[fixture.league_id] || { name: fixture.league_id, badge: "⚽" };
 
   return (
     <div className="bg-[#111726] border border-gray-800/80 hover:border-gray-700 rounded-xl p-5 transition shadow-lg relative group">
       {/* Top row: league & date */}
       <div className="flex items-center justify-between text-xs text-gray-400 mb-4 pb-3 border-b border-gray-800/60 font-mono">
-        <span className="font-bold text-blue-400 uppercase tracking-wider">{fixture.league_id}</span>
+        <span className="inline-flex items-center space-x-1.5 font-bold text-blue-400 uppercase tracking-wider">
+          <span>{leagueInfo.badge}</span>
+          <span>{leagueInfo.name}</span>
+        </span>
         <div className="flex items-center space-x-1.5" suppressHydrationWarning>
           <Clock className="w-3.5 h-3.5 text-gray-500" />
           <span suppressHydrationWarning>
