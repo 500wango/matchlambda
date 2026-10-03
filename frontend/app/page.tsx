@@ -463,7 +463,11 @@ function HomeContent() {
         }}
       />
 
-      <AnalysisModal matchId={selectedMatchId} onClose={() => setSelectedMatchId(null)} />
+      <AnalysisModal
+        matchId={selectedMatchId}
+        fixture={fixtures.find((f) => f.match_id === selectedMatchId)}
+        onClose={() => setSelectedMatchId(null)}
+      />
     </div>
   );
 }
