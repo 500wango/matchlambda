@@ -231,3 +231,34 @@ async def test_payment_and_analyst_entitlement():
             assert len(analysis_data["prediction"]["score_matrix"]) == 6
             assert "omitted_mass" in analysis_data["prediction"]
             assert "top_scores" in analysis_data["prediction"]
+
+
+@pytest.mark.asyncio
+async def test_daily_picks_and_parlays():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Fetch daily picks
+        res = await client.get("/v1/picks/daily")
+        assert res.status_code == 200
+        data = res.json()
+        assert "summary" in data
+        assert "bankers" in data
+        assert "values" in data
+        assert "underdogs" in data
+        assert "goals" in data
+        assert "parlays" in data
+
+        if data["bankers"]:
+            b0 = data["bankers"][0]
+            assert "category" in b0
+            assert b0["category"] == "BANKER"
+            assert "reasoning" in b0
+            assert "【稳胆核心理由】" in b0["reasoning"]
+
+        if data["parlays"]:
+            p0 = data["parlays"][0]
+            assert "combined_odds" in p0
+            assert "win_probability_pct" in p0
+            assert "copy_text" in p0
+            assert len(p0["legs"]) >= 2
+

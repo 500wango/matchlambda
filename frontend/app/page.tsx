@@ -10,6 +10,7 @@ import { AnalysisModal } from "@/components/AnalysisModal";
 import { AlphaScannerView } from "@/components/AlphaScannerView";
 import { BacktestView } from "@/components/BacktestView";
 import { BankrollSimulatorView } from "@/components/BankrollSimulatorView";
+import { DailyPicksView } from "@/components/DailyPicksView";
 import { apiRequest, setAuthToken } from "@/lib/api";
 import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle, Trophy, Zap, TrendingUp, Calculator, BarChart3 } from "lucide-react";
 
@@ -106,8 +107,8 @@ function HomeContent() {
   const [daysAhead, setDaysAhead] = useState<number>(10);
   const [valueOnly, setValueOnly] = useState<boolean>(false);
 
-  // Terminal Mode View: SCANNER (default), FIXTURES, BACKTEST, SIMULATOR
-  const [terminalTab, setTerminalTab] = useState<"SCANNER" | "FIXTURES" | "BACKTEST" | "SIMULATOR">("SCANNER");
+  // Terminal Mode View: PICKS (default for casual users), SCANNER (alpha quant), FIXTURES, BACKTEST, SIMULATOR
+  const [terminalTab, setTerminalTab] = useState<"PICKS" | "SCANNER" | "FIXTURES" | "BACKTEST" | "SIMULATOR">("PICKS");
   const [liveTickerSignals, setLiveTickerSignals] = useState<any[]>([]);
 
   // Modals
@@ -236,6 +237,18 @@ function HomeContent() {
         <div className="flex items-center justify-between border-b border-gray-800 pb-3">
           <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none">
             <button
+              onClick={() => setTerminalTab("PICKS")}
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+                terminalTab === "PICKS"
+                  ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/20 border border-emerald-400/40"
+                  : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-emerald-300 animate-pulse" />
+              <span>🎯 今日智能推荐 (Daily Picks)</span>
+            </button>
+
+            <button
               onClick={() => setTerminalTab("SCANNER")}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
                 terminalTab === "SCANNER"
@@ -286,6 +299,14 @@ function HomeContent() {
         </div>
 
         {/* View Content Panels */}
+        {terminalTab === "PICKS" && (
+          <DailyPicksView
+            isAnalyst={isAnalyst}
+            onOpenPricing={() => setIsPricingOpen(true)}
+            onSelectMatch={(id) => setSelectedMatchId(id)}
+          />
+        )}
+
         {terminalTab === "SCANNER" && (
           <AlphaScannerView
             isAnalyst={isAnalyst}

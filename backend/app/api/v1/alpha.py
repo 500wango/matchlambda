@@ -15,8 +15,72 @@ from app.api.deps import get_current_user_optional, is_active_analyst
 from app.math.ev import calculate_ev, calculate_half_kelly
 from app.math.derivatives import compute_derived_markets
 from app.math.backtest import run_historical_backtest, BacktestRequest
+from app.math.picks import compile_daily_picks
 
 router = APIRouter(prefix="", tags=["Quant Alpha"])
+
+
+@router.get("/picks/daily")
+@router.get("/alpha/picks")
+async def get_daily_picks_endpoint(
+    league_id: Optional[str] = Query(None, description="League filter (e.g. 'TOP5', 'EPL', 'NORDIC', 'ALL', or specific ID)"),
+    days_ahead: int = Query(10, ge=1, le=30),
+    user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Curated Daily AI Picks & Accumulators for Casual and Recreational Bettors.
+    Categories:
+    - ⭐ 今日稳胆 (Banker / High Confidence)
+    - 🔥 每日精选 (Pick of the Day / Value)
+    - 💣 搏冷高赔 (Underdog & Draw Value)
+    - ⚽ 进球狂欢 (Goal Feast / Over 2.5)
+    - 🔗 智能 2 串 1 / 3 串 1 方案 (Smart Parlay Generator)
+    """
+    now = datetime.now(timezone.utc)
+    end_date = now + timedelta(days=days_ahead)
+
+    query = (
+        select(Match)
+        .options(
+            selectinload(Match.home_team),
+            selectinload(Match.away_team),
+            selectinload(Match.predictions).selectinload(Prediction.odds_snapshot),
+            selectinload(Match.predictions).selectinload(Prediction.model_parameters),
+        )
+        .where(
+            Match.status == "SCHEDULED",
+            Match.match_date >= now,
+            Match.match_date < end_date,
+        )
+    )
+
+    TOP_5_LEAGUES = ["EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1"]
+    NORDIC_LEAGUES = ["ALLSVENSKAN", "ELITESERIEN", "SUPERLIGA", "AUSTRIAN_BUNDESLIGA"]
+    EURO_OTHER = ["CHAMPIONSHIP", "EREDIVISIE", "PRIMEIRA_LIGA"]
+    GLOBAL_LEAGUES = ["MLS", "BRASILEIRAO", "SAUDI_PRO_LEAGUE"]
+    CUPS = ["UCL", "UEL"]
+
+    if league_id:
+        lid_clean = league_id.strip().upper()
+        if lid_clean in ("TOP5", "TOP_5", "五大联赛"):
+            query = query.where(Match.league_id.in_(TOP_5_LEAGUES))
+        elif lid_clean in ("NORDIC", "北欧"):
+            query = query.where(Match.league_id.in_(NORDIC_LEAGUES))
+        elif lid_clean in ("EURO_OTHER", "欧洲其他"):
+            query = query.where(Match.league_id.in_(EURO_OTHER))
+        elif lid_clean in ("GLOBAL", "全球"):
+            query = query.where(Match.league_id.in_(GLOBAL_LEAGUES))
+        elif lid_clean in ("CUPS", "杯赛"):
+            query = query.where(Match.league_id.in_(CUPS))
+        elif lid_clean not in ("ALL", "*"):
+            query = query.where(Match.league_id == lid_clean)
+
+    query = query.order_by(Match.match_date.asc())
+    matches = (await db.execute(query)).scalars().all()
+
+    return compile_daily_picks(matches, league_id=league_id)
+
 
 
 @router.get("/alpha/scanner")
