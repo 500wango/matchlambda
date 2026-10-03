@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { X, Check, Shield, ExternalLink, RefreshCw, AlertCircle } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 interface PricingModalProps {
   isOpen: boolean;
@@ -17,6 +18,8 @@ export const PricingModal: React.FC<PricingModalProps> = ({
   user,
   onSuccessPayment,
 }) => {
+  const { lang, t } = useI18n();
+  const isEn = lang === "en";
   const [selectedPlan, setSelectedPlan] = useState<"PRO_MONTHLY" | "PRO_SEASON">("PRO_MONTHLY");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,14 +70,13 @@ export const PricingModal: React.FC<PricingModalProps> = ({
 
   const handleCheckout = async () => {
     if (!user) {
-      setError("Please log in before purchasing a pass.");
+      setError(isEn ? "Please log in before purchasing a pass." : "请在购买通行证前先登录账号。");
       return;
     }
     setError(null);
     setLoading(true);
 
     try {
-      // Generate standard UUID v4 idempotency key
       const idempotencyKey = crypto.randomUUID();
 
       const res = await apiRequest<any>("/payments/create-invoice", {
@@ -92,7 +94,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         window.open(res.checkout_url, "_blank", "noopener,noreferrer");
       }
     } catch (err: any) {
-      setError(err?.message || "Failed to initialize payment invoice.");
+      setError(err?.message || (isEn ? "Failed to initialize payment invoice." : "生成支付账单失败，请重试。"));
     } finally {
       setLoading(false);
     }
@@ -123,18 +125,18 @@ export const PricingModal: React.FC<PricingModalProps> = ({
           type="button"
           onClick={onClose}
           className="absolute top-5 right-5 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition"
-          aria-label="关闭"
+          aria-label={isEn ? "Close" : "关闭"}
         >
           <X className="w-5 h-5" />
         </button>
 
         <div className="text-center max-w-md mx-auto mb-8">
           <div className="inline-flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 mb-3">
-            <Shield className="w-3.5 h-3.5 mr-1" /> MatchLambda Analyst Pass
+            <Shield className="w-3.5 h-3.5 mr-1" /> {isEn ? "MatchLambda Analyst Pass" : "MatchLambda 专家专属通行证"}
           </div>
-          <h2 className="text-2xl font-extrabold text-white">Full Access to EPL Probabilities</h2>
+          <h2 className="text-2xl font-extrabold text-white">{t("pricing.title")}</h2>
           <p className="text-xs text-gray-400 mt-2">
-            Non-recurring passes with instant cryptocurrency checkout via NOWPayments.
+            {t("pricing.subtitle")}
           </p>
         </div>
 
@@ -158,27 +160,27 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                 }`}
               >
                 <div className="flex justify-between items-center mb-2">
-                  <h4 className="font-bold text-white text-base">Monthly Pass</h4>
+                  <h4 className="font-bold text-white text-base">{isEn ? "Monthly Pass" : "月度通行证"}</h4>
                   <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">
-                    30 Days
+                    {isEn ? "30 Days" : "30 天"}
                   </span>
                 </div>
                 <div className="flex items-baseline mb-4">
                   <span className="text-3xl font-extrabold text-white">$29</span>
-                  <span className="text-xs text-gray-400 ml-1">/ one-time</span>
+                  <span className="text-xs text-gray-400 ml-1">{isEn ? "/ one-time" : "/ 一次性"}</span>
                 </div>
                 <ul className="space-y-2 text-xs text-gray-300">
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> Full Dixon-Coles 1X2 Probabilities
+                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "Full Dixon-Coles 1X2 Probabilities" : "五大联赛与全球联赛 1X2 泊松真实概率"}
                   </li>
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> 6×6 Score Distribution Matrix
+                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "6×6 Score Distribution Matrix" : "6×6 详尽比分联合概率矩阵"}
                   </li>
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> Real-time EV & Half-Kelly Scanner
+                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "Real-time +EV Alpha Scanner" : "实时 +EV 价值雷达与凯利仓位计算"}
                   </li>
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> Shin De-juiced Market Benchmarks
+                    <Check className="w-3.5 h-3.5 text-blue-400 mr-2 flex-shrink-0" /> {isEn ? "Multi-market Derivatives: Totals & BTTS" : "高阶衍生盘口：大小球、双进与亚盘让球"}
                   </li>
                 </ul>
               </div>
@@ -193,30 +195,30 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                 }`}
               >
                 <div className="absolute -top-3 right-4 bg-gradient-to-r from-amber-500 to-orange-500 text-black font-extrabold text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Best Value
+                  {isEn ? "Best Value" : "推荐首选"}
                 </div>
                 <div className="flex justify-between items-center mb-2">
-                  <h4 className="font-bold text-white text-base">Season Pass</h4>
+                  <h4 className="font-bold text-white text-base">{isEn ? "Season Pass" : "季度赛季通行证"}</h4>
                   <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-500/20 text-amber-400">
-                    270 Days
+                    {isEn ? "90 Days" : "90 天"}
                   </span>
                 </div>
                 <div className="flex items-baseline mb-4">
-                  <span className="text-3xl font-extrabold text-white">$149</span>
-                  <span className="text-xs text-gray-400 ml-1">/ 9 months</span>
+                  <span className="text-3xl font-extrabold text-white">$69</span>
+                  <span className="text-xs text-gray-400 ml-1">{isEn ? "/ 3 months" : "/ 3 个月"}</span>
                 </div>
                 <ul className="space-y-2 text-xs text-gray-300">
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> Full EPL Season Coverage (270d)
+                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "All 17 Leagues Full Coverage (90d)" : "全部 17 大联赛无限覆盖 (90天)"}
                   </li>
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> All Match Matrix & Top Scores
+                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "Unrestricted +EV Scanner & Staking" : "无限制实时 +EV 信号雷达与实时推送"}
                   </li>
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> Unrestricted EV Filter & Alerts
+                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "Smart Parlay 2-fold & 3-fold Generator" : "智能 2 串 1 / 3 串 1 方案一键生成"}
                   </li>
                   <li className="flex items-center">
-                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> Complete Chronological Evaluation
+                    <Check className="w-3.5 h-3.5 text-amber-400 mr-2 flex-shrink-0" /> {isEn ? "Monte Carlo Bankroll Simulation" : "蒙特卡洛 1000 路径资金回撤模拟"}
                   </li>
                 </ul>
               </div>
@@ -230,11 +232,11 @@ export const PricingModal: React.FC<PricingModalProps> = ({
               {loading ? (
                 <>
                   <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  Creating Secure Hosted Invoice...
+                  {isEn ? "Creating Secure Hosted Invoice..." : "正在创建加密货币收银台账单..."}
                 </>
               ) : (
                 <>
-                  Proceed with Crypto Checkout
+                  {t("pricing.payCrypto")}
                   <ExternalLink className="w-4 h-4 ml-2" />
                 </>
               )}
@@ -253,14 +255,14 @@ export const PricingModal: React.FC<PricingModalProps> = ({
             <div>
               <h4 className="font-bold text-white text-lg">
                 {activeOrder.payment_status === "PAID"
-                  ? "Payment Confirmed & Pass Activated!"
-                  : "Awaiting Crypto Settlement"}
+                  ? (isEn ? "Payment Confirmed & Pass Activated!" : "支付成功，ANALYST 权限已即时开通！")
+                  : (isEn ? "Awaiting Crypto Settlement" : "等待链上确认结算中...")}
               </h4>
               <p className="text-xs text-gray-400 mt-1 font-mono">Order ID: {activeOrder.order_id}</p>
             </div>
 
             <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-800 text-xs">
-              <span className="text-gray-400">Status:</span>
+              <span className="text-gray-400">{isEn ? "Status:" : "状态:"}</span>
               <span className="font-bold font-mono text-blue-400">{pollingStatus || activeOrder.payment_status}</span>
             </div>
 
@@ -272,7 +274,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   rel="noopener noreferrer"
                   className="inline-flex items-center text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-lg transition"
                 >
-                  Open NOWPayments Checkout <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
+                  {isEn ? "Open NOWPayments Hosted Checkout" : "前往 NOWPayments 安全收银台支付"} <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
                 </a>
               </div>
             )}
@@ -283,7 +285,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   onClick={onClose}
                   className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-lg transition"
                 >
-                  Start Analyzing EPL Matches
+                  {isEn ? "Start Analyzing Matches" : "立即体验量化终端"}
                 </button>
               </div>
             )}

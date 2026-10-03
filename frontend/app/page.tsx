@@ -12,6 +12,7 @@ import { BacktestView } from "@/components/BacktestView";
 import { BankrollSimulatorView } from "@/components/BankrollSimulatorView";
 import { DailyPicksView } from "@/components/DailyPicksView";
 import { apiRequest, setAuthToken } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle, Trophy, Zap, TrendingUp, Calculator, BarChart3 } from "lucide-react";
 
 interface LeagueOption {
@@ -94,6 +95,7 @@ for (const cat of LEAGUE_CATEGORIES) {
 }
 
 function HomeContent() {
+  const { lang, t } = useI18n();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any | null>(null);
   const [selectedLeague, setSelectedLeague] = useState<string>("TOP5");
@@ -208,7 +210,7 @@ function HomeContent() {
           <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl px-4 py-2.5 flex items-center justify-between overflow-hidden text-xs font-mono">
             <div className="flex items-center space-x-2 flex-shrink-0 mr-4 text-emerald-400 font-bold">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-              <span>实时 +EV 套利信号流:</span>
+              <span>{t("tabs.liveTicker")}</span>
             </div>
             <div className="flex items-center space-x-6 overflow-x-auto scrollbar-none whitespace-nowrap">
               {liveTickerSignals.map((sig) => (
@@ -226,7 +228,7 @@ function HomeContent() {
                   <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
                     +{sig.ev_pct}% EV
                   </span>
-                  <span className="text-gray-400">赔率 {sig.market_odds}</span>
+                  <span className="text-gray-400">{t("tabs.odds")} {sig.market_odds}</span>
                 </button>
               ))}
             </div>
@@ -238,62 +240,62 @@ function HomeContent() {
           <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none">
             <button
               onClick={() => setTerminalTab("PICKS")}
-              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "PICKS"
                   ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/20 border border-emerald-400/40"
                   : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
               }`}
             >
               <Sparkles className="w-4 h-4 text-emerald-300 animate-pulse" />
-              <span>🎯 今日智能推荐 (Daily Picks)</span>
+              <span>{t("tabs.picks")}</span>
             </button>
 
             <button
               onClick={() => setTerminalTab("SCANNER")}
-              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "SCANNER"
                   ? "bg-emerald-600 text-white shadow-lg shadow-emerald-500/20 border border-emerald-400/40"
                   : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
               }`}
             >
               <Zap className="w-4 h-4 text-amber-300" />
-              <span>⚡ +EV 价值雷达 (Alpha Scanner)</span>
+              <span>{t("tabs.scanner")}</span>
             </button>
 
             <button
               onClick={() => setTerminalTab("FIXTURES")}
-              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "FIXTURES"
                   ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20 border border-blue-400/40"
                   : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
               }`}
             >
               <Trophy className="w-4 h-4 text-blue-300" />
-              <span>⚽ 赛程与多盘口预测 (Match Feeds)</span>
+              <span>{t("tabs.fixtures")}</span>
             </button>
 
             <button
               onClick={() => setTerminalTab("BACKTEST")}
-              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "BACKTEST"
                   ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20 border border-purple-400/40"
                   : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
               }`}
             >
               <TrendingUp className="w-4 h-4 text-purple-300" />
-              <span>📈 量化回测与资金曲线 (Track Record)</span>
+              <span>{t("tabs.backtest")}</span>
             </button>
 
             <button
               onClick={() => setTerminalTab("SIMULATOR")}
-              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "SIMULATOR"
                   ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 border border-indigo-400/40"
                   : "bg-[#0d121f] text-gray-400 hover:text-white border border-gray-800"
               }`}
             >
               <Calculator className="w-4 h-4 text-indigo-300" />
-              <span>💼 蒙特卡洛资金模拟器 (Monte Carlo)</span>
+              <span>{t("tabs.simulator")}</span>
             </button>
           </div>
         </div>
@@ -580,11 +582,8 @@ function HomeContent() {
 
         {/* Risk Disclaimer */}
         <div className="p-4 rounded-xl bg-gray-900/40 border border-gray-800 text-[11px] text-gray-500 leading-relaxed font-mono">
-          <strong className="text-gray-400 uppercase">Analytical Disclaimer: </strong>
-          MatchLambda estimates are generated via regulation-time Dixon–Coles Poisson modeling.
-          Market-derived probabilities and Shin de-juiced odds are statistical approximations, not
-          ground truth. A positive unrounded EV (≥ 0.05) or Half-Kelly fraction does not constitute
-          financial advice, trade execution, or any guarantee of profitability.
+          <strong className="text-gray-400 uppercase">{t("disclaimer.title")}</strong>
+          {t("disclaimer.text")}
         </div>
       </main>
 

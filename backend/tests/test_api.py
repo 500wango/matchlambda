@@ -262,3 +262,17 @@ async def test_daily_picks_and_parlays():
             assert "copy_text" in p0
             assert len(p0["legs"]) >= 2
 
+        # 2. Fetch daily picks in English
+        res_en = await client.get("/v1/picks/daily?lang=en")
+        assert res_en.status_code == 200
+        data_en = res_en.json()
+        assert data_en["lang"] == "en"
+        if data_en["bankers"]:
+            b0_en = data_en["bankers"][0]
+            assert "Banker Rationale" in b0_en["reasoning"]
+            assert "Daily Banker" in b0_en["category_label"]
+        if data_en["parlays"]:
+            p0_en = data_en["parlays"][0]
+            assert "Ticket" in p0_en["copy_text"] or "Parlay" in p0_en["copy_text"]
+
+

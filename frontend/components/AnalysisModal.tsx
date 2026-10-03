@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { X, Clock, AlertTriangle, Activity, Database, CheckCircle, Flame, Layers, Calculator, ShieldCheck, TrendingUp, BarChart2 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 interface AnalysisModalProps {
   matchId: string | null;
@@ -11,6 +12,8 @@ interface AnalysisModalProps {
 }
 
 export const AnalysisModal: React.FC<AnalysisModalProps> = ({ matchId, fixture, onClose }) => {
+  const { lang, t } = useI18n();
+  const isEn = lang === "en";
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,9 +107,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({ matchId, fixture, 
             type="button"
             onClick={onClose}
             className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 hover:text-white transition text-xs font-semibold flex-shrink-0 ml-3 border border-gray-700 shadow-sm"
-            aria-label="关闭窗口"
+            aria-label={isEn ? "Close modal" : "关闭窗口"}
           >
-            <span>关闭</span>
+            <span>{isEn ? "Close" : "关闭"}</span>
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -114,13 +117,13 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({ matchId, fixture, 
         {/* Modal Subnav Tabs */}
         <div className="flex items-center space-x-1 px-5 sm:px-7 pt-3 pb-2 border-b border-gray-800/80 bg-[#0a0e18] overflow-x-auto text-xs font-mono scrollbar-none flex-shrink-0">
           {[
-            { id: "1X2", label: "1X2 胜平负与 EV" },
-            { id: "TOTALS", label: "大小球 (Totals O/U)" },
-            { id: "BTTS", label: "双方进球 (BTTS)" },
-            { id: "HANDICAP", label: "亚盘让球 (Spreads)" },
-            { id: "DC", label: "双胜彩与退款 (DC/DNB)" },
-            { id: "MATRIX", label: "6×6 比分矩阵" },
-            { id: "STAKE", label: "💰 个人仓位计算器" },
+            { id: "1X2", label: isEn ? "1X2 & EV Edge" : "1X2 胜平负与 EV" },
+            { id: "TOTALS", label: isEn ? "Totals (Over/Under)" : "大小球 (Totals O/U)" },
+            { id: "BTTS", label: isEn ? "Both Teams Score (BTTS)" : "双方进球 (BTTS)" },
+            { id: "HANDICAP", label: isEn ? "Asian Handicap" : "亚盘让球 (Spreads)" },
+            { id: "DC", label: isEn ? "Double Chance & DNB" : "双胜彩与退款 (DC/DNB)" },
+            { id: "MATRIX", label: isEn ? "6×6 Score Matrix" : "6×6 比分矩阵" },
+            { id: "STAKE", label: isEn ? "💰 Kelly Calculator" : "💰 个人仓位计算器" },
           ].map((tab) => (
             <button
               key={tab.id}

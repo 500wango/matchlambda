@@ -25,6 +25,7 @@ router = APIRouter(prefix="", tags=["Quant Alpha"])
 async def get_daily_picks_endpoint(
     league_id: Optional[str] = Query(None, description="League filter (e.g. 'TOP5', 'EPL', 'NORDIC', 'ALL', or specific ID)"),
     days_ahead: int = Query(10, ge=1, le=30),
+    lang: str = Query("zh", pattern="^(zh|en)$", description="Language: 'zh' for Chinese, 'en' for English"),
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
@@ -79,7 +80,7 @@ async def get_daily_picks_endpoint(
     query = query.order_by(Match.match_date.asc())
     matches = (await db.execute(query)).scalars().all()
 
-    return compile_daily_picks(matches, league_id=league_id)
+    return compile_daily_picks(matches, league_id=league_id, lang=lang)
 
 
 

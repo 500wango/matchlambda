@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { LineChart, TrendingUp, ShieldCheck, Award, AlertCircle, BarChart3, RefreshCw, CheckCircle2, DollarSign } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 interface BacktestViewProps {
   isAnalyst: boolean;
@@ -10,6 +11,9 @@ interface BacktestViewProps {
 }
 
 export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPricing }) => {
+  const { lang, t } = useI18n();
+  const isEn = lang === "en";
+
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +35,11 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPri
       const res = await apiRequest<any>(url);
       setData(res);
     } catch (err: any) {
-      setError(err?.message || "Failed to execute backtest simulation.");
+      setError(err?.message || (isEn ? "Failed to execute backtest simulation." : "执行量化回测失败。"));
     } finally {
       setLoading(false);
     }
-  }, [bankroll, strategy, minEv, league]);
+  }, [bankroll, strategy, minEv, league, isEn]);
 
   useEffect(() => {
     runBacktest();
@@ -48,35 +52,36 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPri
   // Generate SVG path for equity curve
   const renderEquitySvg = () => {
     if (equityCurve.length < 2) return null;
-    const width = 800;
-    const height = 240;
-    const padding = 35;
 
-    const values = equityCurve.map((d: any) => d.bankroll);
-    const minVal = Math.min(...values) * 0.95;
-    const maxVal = Math.max(...values) * 1.05;
+    const width = 800;
+    const height = 260;
+    const padding = 50;
+
+    const bankrolls = equityCurve.map((p: any) => p.bankroll);
+    const minVal = Math.min(...bankrolls);
+    const maxVal = Math.max(...bankrolls);
     const range = maxVal - minVal || 1;
 
-    const points = equityCurve.map((d: any, idx: number) => {
+    const points = equityCurve.map((p: any, idx: number) => {
       const x = padding + (idx / (equityCurve.length - 1)) * (width - 2 * padding);
-      const y = height - padding - ((d.bankroll - minVal) / range) * (height - 2 * padding);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
+      const y = height - padding - ((p.bankroll - minVal) / range) * (height - 2 * padding);
+      return `${x},${y}`;
     });
 
     const pathD = `M ${points.join(" L ")}`;
-    const areaD = `${pathD} L ${width - padding},${height - padding} L ${padding},${height - padding} Z`;
+    const areaD = `M ${points[0]} L ${points.join(" L ")} L ${width - padding},${height - padding} L ${padding},${height - padding} Z`;
 
     return (
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-56 overflow-visible">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible">
         <defs>
           <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
+            <stop offset="0%" stopColor="#10b981" stopOpacity="0.28" />
             <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
           </linearGradient>
         </defs>
         {/* Horizontal gridlines */}
         {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
-          const y = padding + pct * (height - 2 * padding);
+          const y = height - padding - pct * (height - 2 * padding);
           const val = maxVal - pct * range;
           return (
             <g key={i}>
@@ -102,20 +107,22 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPri
           <div>
             <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 mb-3">
               <Award className="w-3.5 h-3.5" />
-              <span>Multi-Season Historical Validation & CLV Benchmark</span>
+              <span>{isEn ? "Multi-Season Historical Validation & CLV Benchmark" : "多赛季实盘检验与收盘线 (CLV) 基准"}</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
-              <span>📈 模型历史回测与资金收益曲线</span>
+              <span>📈 {t("backtest.title")}</span>
             </h2>
             <p className="text-xs sm:text-sm text-gray-400 mt-2 max-w-2xl leading-relaxed">
-              根据 Dixon–Coles 时间衰减模型在数千场历史比赛中的实盘回测结果。所有交易均按严格的样本外拓展交叉验证（Walk-Forward Out-of-Sample）执行，拒绝过拟合与数据窥视偏差。
+              {t("backtest.subtitle")}
             </p>
           </div>
 
           {/* Controls */}
           <div className="bg-[#090d16] border border-gray-800/80 rounded-xl p-4 flex flex-wrap items-center gap-4">
             <div>
-              <label className="text-[11px] font-mono text-gray-400 block mb-1">初始资金</label>
+              <label className="text-[11px] font-mono text-gray-400 block mb-1">
+                {t("backtest.initialCapital")}
+              </label>
               <input
                 type="number"
                 value={bankroll}
@@ -124,20 +131,24 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPri
               />
             </div>
             <div>
-              <label className="text-[11px] font-mono text-gray-400 block mb-1">仓位管理</label>
+              <label className="text-[11px] font-mono text-gray-400 block mb-1">
+                {isEn ? "Staking" : "仓位管理"}
+              </label>
               <select
                 value={strategy}
                 onChange={(e) => setStrategy(e.target.value)}
                 className="px-2 py-1.5 bg-[#0f1523] border border-gray-700 rounded-lg text-white font-mono text-xs"
               >
-                <option value="HALF_KELLY">半凯利 (Half-Kelly)</option>
-                <option value="QUARTER_KELLY">四分之一凯利 (保守)</option>
-                <option value="FIXED_1_PCT">固定 1%</option>
-                <option value="FLAT_UNIT">平注 (Flat)</option>
+                <option value="HALF_KELLY">{isEn ? "Half-Kelly (0.5x)" : "半凯利 (Half-Kelly)"}</option>
+                <option value="QUARTER_KELLY">{isEn ? "Quarter-Kelly (0.25x)" : "四分之一凯利 (保守)"}</option>
+                <option value="FIXED_1_PCT">{isEn ? "Fixed 1%" : "固定 1%"}</option>
+                <option value="FLAT_UNIT">{isEn ? "Flat Unit" : "平注 (Flat)"}</option>
               </select>
             </div>
             <div>
-              <label className="text-[11px] font-mono text-gray-400 block mb-1">最低 EV</label>
+              <label className="text-[11px] font-mono text-gray-400 block mb-1">
+                {isEn ? "Min EV" : "最低 EV"}
+              </label>
               <select
                 value={minEv}
                 onChange={(e) => setMinEv(Number(e.target.value))}
@@ -155,7 +166,7 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPri
                 className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-xs flex items-center transition"
               >
                 <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} />
-                重新运算
+                {isEn ? "Recalculate" : "重新运算"}
               </button>
             </div>
           </div>
@@ -166,7 +177,7 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPri
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">净利润 (Net Profit)</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("backtest.profit")}</span>
             <span className="text-xl sm:text-2xl font-black text-emerald-400 mt-1 block">
               +${summary.net_profit.toLocaleString()}
             </span>
@@ -174,43 +185,43 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPri
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">终盘击败率 (Beat CLV)</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("backtest.beatClv")}</span>
             <span className="text-xl sm:text-2xl font-black text-blue-400 mt-1 block">
               {summary.beat_clv_rate_pct}%
             </span>
-            <span className="text-[10px] font-mono text-gray-400">击败平博终盘</span>
+            <span className="text-[10px] font-mono text-gray-400">{isEn ? "Beating Pinnacle CLV" : "击败平博终盘"}</span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">夏普比率 (Sharpe)</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("backtest.sharpe")}</span>
             <span className="text-xl sm:text-2xl font-black text-purple-400 mt-1 block">
               {summary.sharpe_ratio}
             </span>
-            <span className="text-[10px] font-mono text-gray-400">年化风险调整</span>
+            <span className="text-[10px] font-mono text-gray-400">{isEn ? "Annualized Risk-Adj" : "年化风险调整"}</span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">最大回撤 (Max DD)</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("backtest.maxDd")}</span>
             <span className="text-xl sm:text-2xl font-black text-rose-400 mt-1 block">
               -{summary.max_drawdown_pct}%
             </span>
-            <span className="text-[10px] font-mono text-gray-400">峰谷最大下撤</span>
+            <span className="text-[10px] font-mono text-gray-400">{isEn ? "Peak-to-Trough" : "峰谷最大下撤"}</span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">总下注场次</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("backtest.totalTrades")}</span>
             <span className="text-xl sm:text-2xl font-black text-white mt-1 block">
               {summary.total_bets}
             </span>
-            <span className="text-[10px] font-mono text-gray-400">胜率: {summary.win_rate_pct}%</span>
+            <span className="text-[10px] font-mono text-gray-400">{isEn ? "Win Rate" : "胜率"}: {summary.win_rate_pct}%</span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">Brier 评分改善</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{isEn ? "Brier Gain" : "Brier 评分改善"}</span>
             <span className="text-xl sm:text-2xl font-black text-amber-400 mt-1 block">
               +{summary.brier_improvement_pct}%
             </span>
-            <span className="text-[10px] font-mono text-gray-400">校准超越市场</span>
+            <span className="text-[10px] font-mono text-gray-400">{isEn ? "Edge vs Market" : "校准超越市场"}</span>
           </div>
         </div>
       )}
@@ -221,21 +232,21 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPri
           <div>
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-emerald-400" />
-              累计资金增长曲线 (Cumulative Equity Curve)
+              {t("backtest.equityCurve")}
             </h3>
             <p className="text-xs text-gray-400 mt-0.5 font-mono">
-              初始本金: ${bankroll.toLocaleString()} → 终值: ${summary?.final_bankroll.toLocaleString()}
+              {isEn ? "Initial Capital" : "初始本金"}: ${bankroll.toLocaleString()} → {isEn ? "Final" : "终值"}: ${summary?.final_bankroll.toLocaleString()}
             </p>
           </div>
           <span className="text-xs font-mono px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
-            净胜: +${summary?.net_profit.toLocaleString()}
+            {isEn ? "Net PnL" : "净胜"}: +${summary?.net_profit.toLocaleString()}
           </span>
         </div>
 
         {loading ? (
           <div className="py-24 text-center">
             <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-xs text-gray-400 font-mono">计算多赛季净值曲线...</p>
+            <p className="text-xs text-gray-400 font-mono">{isEn ? "Computing multi-season equity curve..." : "计算多赛季净值曲线..."}</p>
           </div>
         ) : (
           <div className="py-2">
@@ -249,25 +260,25 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ isAnalyst, onOpenPri
         <div className="p-4 sm:p-5 border-b border-gray-800 flex items-center justify-between">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-blue-400" />
-            回测交易明细样本抽检 (Sample Audit Log)
+            {t("backtest.recentTrades")}
           </h3>
-          <span className="text-xs font-mono text-gray-400">展示最近 20 笔决策</span>
+          <span className="text-xs font-mono text-gray-400">{isEn ? "Showing recent 20 audits" : "展示最近 20 笔决策"}</span>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs font-mono">
             <thead>
               <tr className="border-b border-gray-800/80 bg-[#0a0e1a] text-gray-400 text-[11px]">
-                <th className="py-2.5 px-4">单号</th>
-                <th className="py-2.5 px-4">日期</th>
-                <th className="py-2.5 px-4">联赛</th>
-                <th className="py-2.5 px-4">方向</th>
-                <th className="py-2.5 px-4">下单赔率</th>
-                <th className="py-2.5 px-4">终盘赔率 (CLV)</th>
-                <th className="py-2.5 px-4">期望 EV</th>
-                <th className="py-2.5 px-4">下注额</th>
-                <th className="py-2.5 px-4">赛果盈亏</th>
-                <th className="py-2.5 px-4">结余本金</th>
+                <th className="py-2.5 px-4">{isEn ? "ID" : "单号"}</th>
+                <th className="py-2.5 px-4">{isEn ? "Date" : "日期"}</th>
+                <th className="py-2.5 px-4">{isEn ? "League" : "联赛"}</th>
+                <th className="py-2.5 px-4">{isEn ? "Selection" : "方向"}</th>
+                <th className="py-2.5 px-4">{isEn ? "Odds" : "下单赔率"}</th>
+                <th className="py-2.5 px-4">{isEn ? "CLV" : "终盘赔率 (CLV)"}</th>
+                <th className="py-2.5 px-4">{isEn ? "EV (%)" : "期望 EV"}</th>
+                <th className="py-2.5 px-4">{isEn ? "Stake" : "下注额"}</th>
+                <th className="py-2.5 px-4">{isEn ? "PnL" : "赛果盈亏"}</th>
+                <th className="py-2.5 px-4">{isEn ? "Balance" : "结余本金"}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/60">

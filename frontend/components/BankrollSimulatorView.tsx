@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Calculator, ShieldAlert, Sparkles, RefreshCw, TrendingUp, Percent, DollarSign, Activity } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 interface BankrollSimulatorViewProps {
   isAnalyst: boolean;
@@ -10,6 +11,9 @@ interface BankrollSimulatorViewProps {
 }
 
 export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () => {
+  const { lang, t } = useI18n();
+  const isEn = lang === "en";
+
   const [bankroll, setBankroll] = useState<number>(10000);
   const [kellyFraction, setKellyFraction] = useState<number>(0.5);
   const [avgEv, setAvgEv] = useState<number>(0.065);
@@ -28,11 +32,11 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
       const res = await apiRequest<any>(url, { method: "POST" });
       setData(res);
     } catch (err: any) {
-      setError(err?.message || "Failed to run Monte Carlo simulation.");
+      setError(err?.message || (isEn ? "Failed to run Monte Carlo simulation." : "执行蒙特卡洛模拟失败。"));
     } finally {
       setLoading(false);
     }
-  }, [bankroll, kellyFraction, avgEv, avgOdds, numBets]);
+  }, [bankroll, kellyFraction, avgEv, avgOdds, numBets, isEn]);
 
   useEffect(() => {
     runSimulation();
@@ -61,10 +65,10 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
     ];
 
     return (
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-60 overflow-visible">
-        {/* Gridlines */}
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible">
+        {/* Horizontal grid */}
         {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
-          const y = padding + pct * (height - 2 * padding);
+          const y = height - padding - pct * (height - 2 * padding);
           const val = maxVal - pct * range;
           return (
             <g key={i}>
@@ -75,21 +79,24 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
             </g>
           );
         })}
-        {/* Paths */}
+
+        {/* 10 Trajectories */}
         {trajectories.map((path: number[], pIdx: number) => {
+          const color = colors[pIdx % colors.length];
           const points = path.map((val: number, stepIdx: number) => {
             const x = padding + (stepIdx / (path.length - 1)) * (width - 2 * padding);
             const y = height - padding - ((val - minVal) / range) * (height - 2 * padding);
-            return `${x.toFixed(1)},${y.toFixed(1)}`;
+            return `${x},${y}`;
           });
+
           return (
             <path
               key={pIdx}
               d={`M ${points.join(" L ")}`}
               fill="none"
-              stroke={colors[pIdx % colors.length]}
-              strokeWidth={pIdx === 0 ? "2.5" : "1.5"}
-              strokeOpacity={pIdx === 0 ? 1 : 0.65}
+              stroke={color}
+              strokeWidth="1.8"
+              strokeOpacity="0.85"
             />
           );
         })}
@@ -105,20 +112,22 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
           <div>
             <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 mb-3">
               <Calculator className="w-3.5 h-3.5" />
-              <span>1,000-Path Monte Carlo Portfolio Engine</span>
+              <span>{isEn ? "1,000-Path Monte Carlo Portfolio Engine" : "1,000 路径蒙特卡洛投资组合推演"}</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
-              <span>💼 蒙特卡洛资金曲线与破产风险模拟器</span>
+              <span>💼 {t("simulator.title")}</span>
             </h2>
             <p className="text-xs sm:text-sm text-gray-400 mt-2 max-w-2xl leading-relaxed">
-              基于凯利公式（Kelly Criterion）进行 1,000 次独立全景路径推演。量化预测在不同下注纪律下本金翻倍的概率、极值压力测试（5% 最坏情形）以及防破产（Ruin Risk）边界。
+              {t("simulator.subtitle")}
             </p>
           </div>
 
           {/* Quick Config Form */}
           <div className="bg-[#090d16] border border-gray-800/80 rounded-xl p-4 flex flex-wrap items-center gap-4">
             <div>
-              <label className="text-[11px] font-mono text-gray-400 block mb-1">本金规模</label>
+              <label className="text-[11px] font-mono text-gray-400 block mb-1">
+                {isEn ? "Bankroll" : "本金规模"}
+              </label>
               <input
                 type="number"
                 value={bankroll}
@@ -127,28 +136,32 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
               />
             </div>
             <div>
-              <label className="text-[11px] font-mono text-gray-400 block mb-1">凯利乘数</label>
+              <label className="text-[11px] font-mono text-gray-400 block mb-1">
+                {isEn ? "Kelly Fraction" : "凯利乘数"}
+              </label>
               <select
                 value={kellyFraction}
                 onChange={(e) => setKellyFraction(Number(e.target.value))}
                 className="px-2 py-1.5 bg-[#0f1523] border border-gray-700 rounded-lg text-white font-mono text-xs"
               >
-                <option value={0.25}>0.25x (超保守)</option>
-                <option value={0.5}>0.50x (半凯利·机构标配)</option>
-                <option value={0.75}>0.75x (积极)</option>
-                <option value={1.0}>1.00x (全凯利·激进)</option>
+                <option value={0.25}>0.25x ({isEn ? "Conservative" : "超保守"})</option>
+                <option value={0.5}>0.50x ({isEn ? "Half-Kelly" : "半凯利·机构标配"})</option>
+                <option value={0.75}>0.75x ({isEn ? "Growth" : "积极"})</option>
+                <option value={1.0}>1.00x ({isEn ? "Full-Kelly" : "全凯利·激进"})</option>
               </select>
             </div>
             <div>
-              <label className="text-[11px] font-mono text-gray-400 block mb-1">模拟场次</label>
+              <label className="text-[11px] font-mono text-gray-400 block mb-1">
+                {isEn ? "Sim Bets" : "模拟场次"}
+              </label>
               <select
                 value={numBets}
                 onChange={(e) => setNumBets(Number(e.target.value))}
                 className="px-2 py-1.5 bg-[#0f1523] border border-gray-700 rounded-lg text-white font-mono text-xs"
               >
-                <option value={50}>50 场交易</option>
-                <option value={100}>100 场交易</option>
-                <option value={200}>200 场交易</option>
+                <option value={50}>50 {isEn ? "Bets" : "场交易"}</option>
+                <option value={100}>100 {isEn ? "Bets" : "场交易"}</option>
+                <option value={200}>200 {isEn ? "Bets" : "场交易"}</option>
               </select>
             </div>
             <div className="self-end">
@@ -158,7 +171,7 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
                 className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold text-xs flex items-center transition"
               >
                 <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} />
-                重新模拟
+                {isEn ? "Simulate" : "重新模拟"}
               </button>
             </div>
           </div>
@@ -169,45 +182,45 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">中位数预期终值 (P50)</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.expectedMedian")}</span>
             <span className="text-xl sm:text-2xl font-black text-emerald-400 mt-1 block">
               ${stats.expected_bankroll_median.toLocaleString()}
             </span>
             <span className="text-[10px] font-mono text-emerald-500 font-bold">
-              中位数收益: +{stats.median_growth_pct}%
+              {isEn ? "Median Return" : "中位数收益"}: +{stats.median_growth_pct}%
             </span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">翻倍概率 (P ≥ 2x)</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.doubleProb")}</span>
             <span className="text-xl sm:text-2xl font-black text-blue-400 mt-1 block">
               {stats.probability_doubling_pct}%
             </span>
-            <span className="text-[10px] font-mono text-gray-400">达到 ${ (bankroll * 2).toLocaleString() }</span>
+            <span className="text-[10px] font-mono text-gray-400">{isEn ? "Reaching" : "达到"} ${ (bankroll * 2).toLocaleString() }</span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">95% 乐观边界 (P95)</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.bestCase")}</span>
             <span className="text-xl sm:text-2xl font-black text-purple-400 mt-1 block">
               ${stats.best_case_p95.toLocaleString()}
             </span>
-            <span className="text-[10px] font-mono text-gray-400">顺风上限区间</span>
+            <span className="text-[10px] font-mono text-gray-400">{isEn ? "Upside Limit" : "顺风上限区间"}</span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">5% 极端压力底线 (P5)</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.worstCase")}</span>
             <span className="text-xl sm:text-2xl font-black text-amber-400 mt-1 block">
               ${stats.worst_case_p5.toLocaleString()}
             </span>
-            <span className="text-[10px] font-mono text-gray-400">极端连黑抗压底线</span>
+            <span className="text-[10px] font-mono text-gray-400">{isEn ? "Extreme Drawdown" : "极端连黑抗压底线"}</span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
-            <span className="text-[11px] font-mono text-gray-400 block">破产风险 (Ruin Risk)</span>
+            <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.ruinRisk")}</span>
             <span className="text-xl sm:text-2xl font-black text-emerald-400 mt-1 block">
               {stats.risk_of_ruin_pct}%
             </span>
-            <span className="text-[10px] font-mono text-emerald-500 font-bold">严格半凯利免爆仓</span>
+            <span className="text-[10px] font-mono text-emerald-500 font-bold">{isEn ? "Safe Half-Kelly Buffer" : "严格半凯利免爆仓"}</span>
           </div>
         </div>
       )}
@@ -218,21 +231,21 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
           <div>
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <Activity className="w-4 h-4 text-purple-400" />
-              1,000 次模拟样本走势图 (Random Walk Sample Paths)
+              {t("simulator.paths")}
             </h3>
             <p className="text-xs text-gray-400 mt-0.5 font-mono">
-              横轴: 下注场次 (0~{numBets}) · 纵轴: 本金规模 ($) · 包含多条随机推演路径
+              {isEn ? `X: Bet Sequence (0~${numBets}) · Y: Portfolio Equity ($)` : `横轴: 下注场次 (0~${numBets}) · 纵轴: 本金规模 ($) · 包含多条随机推演路径`}
             </p>
           </div>
           <span className="text-xs font-mono px-2.5 py-1 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-bold">
-            凯利分数: {kellyFraction}x
+            {isEn ? "Kelly Multiplier" : "凯利分数"}: {kellyFraction}x
           </span>
         </div>
 
         {loading ? (
           <div className="py-24 text-center">
             <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-xs text-gray-400 font-mono">运行 1,000 次路径蒙特卡洛矩阵推演...</p>
+            <p className="text-xs text-gray-400 font-mono">{isEn ? "Running 1,000-path Monte Carlo matrix..." : "运行 1,000 次路径蒙特卡洛矩阵推演..."}</p>
           </div>
         ) : (
           <div className="py-2">

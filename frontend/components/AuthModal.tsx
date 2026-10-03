@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { X, Lock, Mail, AlertCircle } from "lucide-react";
 import { apiRequest, setAuthToken } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -11,6 +12,8 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess }) => {
+  const { lang, t } = useI18n();
+  const isEn = lang === "en";
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,7 +40,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     try {
       if (isRegister) {
         if (password.length < 12 || password.length > 128) {
-          throw { message: "Password must be between 12 and 128 characters." };
+          throw { message: isEn ? "Password must be between 12 and 128 characters." : "密码长度必须在 12 到 128 个字符之间。" };
         }
         await apiRequest("/auth/register", {
           method: "POST",
@@ -55,7 +58,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       onSuccess();
       onClose();
     } catch (err: any) {
-      setError(err?.message || "Authentication failed.");
+      setError(err?.message || (isEn ? "Authentication failed." : "认证失败，请检查账号密码。"));
     } finally {
       setLoading(false);
     }
@@ -76,18 +79,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           type="button"
           onClick={onClose}
           className="absolute top-4 right-4 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition"
-          aria-label="关闭"
+          aria-label={isEn ? "Close" : "关闭"}
         >
           <X className="w-5 h-5" />
         </button>
 
         <h3 className="text-xl font-bold text-white mb-1">
-          {isRegister ? "Create Analyst Account" : "Welcome Back"}
+          {isRegister ? t("auth.registerTitle") : t("auth.loginTitle")}
         </h3>
         <p className="text-xs text-gray-400 mb-6">
           {isRegister
-            ? "Sign up to track EPL probability feeds and market signals."
-            : "Log in with your registered email to continue."}
+            ? (isEn ? "Sign up to access Poisson probabilities and smart picks." : "注册开启五大联赛与全球赛事泊松模型及每日智能推荐。")
+            : (isEn ? "Log in with your registered email to continue." : "使用您注册的邮箱登录以继续使用。")}
         </p>
 
         {error && (
@@ -99,7 +102,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-300 mb-1.5">Email address</label>
+            <label className="block text-xs font-medium text-gray-300 mb-1.5">{t("auth.email")}</label>
             <div className="relative">
               <Mail className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
               <input
@@ -115,7 +118,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
           <div>
             <label className="block text-xs font-medium text-gray-300 mb-1.5">
-              Password {isRegister && <span className="text-gray-400 font-normal">(min 12 chars)</span>}
+              {t("auth.password")} {isRegister && <span className="text-gray-400 font-normal">({isEn ? "min 12 chars" : "至少 12 个字符"})</span>}
             </label>
             <div className="relative">
               <Lock className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
@@ -135,14 +138,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-lg text-sm transition shadow-lg shadow-blue-600/25 disabled:opacity-50 mt-2"
           >
-            {loading ? "Processing..." : isRegister ? "Sign Up" : "Log In"}
+            {loading ? (isEn ? "Processing..." : "处理中...") : isRegister ? t("auth.registerSubmit") : t("auth.loginSubmit")}
           </button>
         </form>
 
         <div className="mt-5 text-center text-xs text-gray-400">
           {isRegister ? (
             <>
-              Already have an account?{" "}
+              {isEn ? "Already have an account? " : "已有账号？ "}
               <button
                 onClick={() => {
                   setIsRegister(false);
@@ -150,12 +153,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                 }}
                 className="text-blue-400 hover:underline font-medium"
               >
-                Log in
+                {t("auth.hasAccount")}
               </button>
             </>
           ) : (
             <>
-              Don't have an account?{" "}
+              {isEn ? "Don't have an account? " : "还没有账号？ "}
               <button
                 onClick={() => {
                   setIsRegister(true);
@@ -163,7 +166,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                 }}
                 className="text-blue-400 hover:underline font-medium"
               >
-                Create account
+                {t("auth.needAccount")}
               </button>
             </>
           )}
