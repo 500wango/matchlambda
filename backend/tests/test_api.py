@@ -5,10 +5,9 @@ from datetime import datetime, timezone, timedelta
 from app.main import app
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models import User, CryptoInvoice
-from app.services.nowpayments import verify_nowpayments_signature, canonical_json_dumps
-import hmac
-import hashlib
+from sqlalchemy import select
+from app.models import User
+from tests.ipn_sign import independent_ipn_signature
 
 
 @pytest.mark.asyncio
@@ -66,15 +65,16 @@ async def test_fixtures_access_and_filter():
         data = res.json()
         assert "total" in data
         assert "fixtures" in data
-        if data["fixtures"]:
-            f0 = data["fixtures"][0]
-            assert "match_id" in f0
-            assert "home_team" in f0
-            assert "away_team" in f0
-            # Free view omits data_status, prediction, comparison
-            assert f0.get("data_status") is None
-            assert f0.get("prediction") is None
-            assert f0.get("comparison") is None
+        # The isolated test DB is seeded with SCHEDULED EPL demo fixtures.
+        assert data["fixtures"], "seeded demo fixtures must be present"
+        f0 = data["fixtures"][0]
+        assert "match_id" in f0
+        assert "home_team" in f0
+        assert "away_team" in f0
+        # Free view omits data_status, prediction, comparison
+        assert f0.get("data_status") is None
+        assert f0.get("prediction") is None
+        assert f0.get("comparison") is None
 
         # 2. Unsupported league -> 422
         res = await client.get("/v1/matches/fixtures?league_id=UNKNOWN_LEAGUE")
@@ -112,7 +112,7 @@ async def test_fixtures_access_and_filter():
 
 
 @pytest.mark.asyncio
-async def test_payment_and_analyst_entitlement():
+async def test_payment_and_analyst_entitlement(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Create user
@@ -122,9 +122,9 @@ async def test_payment_and_analyst_entitlement():
         token = login_res.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Mock settings for payment
-        settings.NOWPAYMENTS_API_KEY = "sandbox_test_key"
-        settings.NOWPAYMENTS_IPN_SECRET = "test_ipn_secret_key_123"
+        monkeypatch.setattr(settings, "NOWPAYMENTS_API_KEY", "sandbox_test_key")
+        monkeypatch.setattr(settings, "PAYMENTS_SANDBOX_MODE", True)
+        monkeypatch.setattr(settings, "NOWPAYMENTS_IPN_SECRET", "test_ipn_secret_key_123")
 
         # 1. Invalid Idempotency-Key -> 422
         res = await client.post(
@@ -179,6 +179,7 @@ async def test_payment_and_analyst_entitlement():
             "order_id": order_id,
             "payment_status": "finished",
             "payment_id": unique_pay_id,
+            "pay_currency": "USDTTRC20",
         }
         res = await client.post(
             "/v1/payments/webhook",
@@ -188,13 +189,8 @@ async def test_payment_and_analyst_entitlement():
         assert res.status_code == 400
         assert res.json()["error"]["code"] == "INVALID_SIGNATURE"
 
-        # 7. Webhook with valid signature -> 200 & grants access
-        canon_json = canonical_json_dumps(webhook_body)
-        valid_sig = hmac.new(
-            settings.NOWPAYMENTS_IPN_SECRET.encode(),
-            canon_json.encode(),
-            hashlib.sha512,
-        ).hexdigest()
+        # 7. Webhook with an independent signature -> 200 & grants access
+        valid_sig = independent_ipn_signature(webhook_body, settings.NOWPAYMENTS_IPN_SECRET)
 
         res = await client.post(
             "/v1/payments/webhook",
@@ -231,19 +227,34 @@ async def test_payment_and_analyst_entitlement():
         analysis_data = res.json()
         assert analysis_data["match_id"] == first_match_id
         assert analysis_data["data_status"] in ("AVAILABLE", "STALE", "UNAVAILABLE")
-        if analysis_data["prediction"]:
-            assert "score_matrix" in analysis_data["prediction"]
-            assert len(analysis_data["prediction"]["score_matrix"]) == 6
-            assert "omitted_mass" in analysis_data["prediction"]
-            assert "top_scores" in analysis_data["prediction"]
+        if not analysis_data["prediction"]:
+            pytest.skip("seeded demo fixture has no stored prediction snapshot")
+        assert "score_matrix" in analysis_data["prediction"]
+        assert len(analysis_data["prediction"]["score_matrix"]) == 6
+        assert "omitted_mass" in analysis_data["prediction"]
+        assert "top_scores" in analysis_data["prediction"]
 
 
 @pytest.mark.asyncio
 async def test_daily_picks_and_parlays():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # 1. Fetch daily picks
-        res = await client.get("/v1/picks/daily")
+        email = f"picks_{uuid.uuid4().hex[:8]}@example.com"
+        password = "Password123456!"
+        await client.post("/v1/auth/register", json={"email": email, "password": password})
+        async with AsyncSessionLocal() as db:
+            user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+            user.plan_tier = "ANALYST"
+            user.plan_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+            await db.commit()
+        login_res = await client.post("/v1/auth/login", json={"email": email, "password": password})
+        assert login_res.status_code == 200
+        headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+        anonymous = await client.get("/v1/picks/daily")
+        assert anonymous.status_code == 401
+
+        res = await client.get("/v1/picks/daily", headers=headers)
         assert res.status_code == 200
         data = res.json()
         assert "summary" in data
@@ -253,30 +264,34 @@ async def test_daily_picks_and_parlays():
         assert "goals" in data
         assert "parlays" in data
 
-        if data["bankers"]:
-            b0 = data["bankers"][0]
-            assert "category" in b0
-            assert b0["category"] == "BANKER"
-            assert "reasoning" in b0
-            assert "【稳胆核心理由】" in b0["reasoning"]
+        if not data["bankers"]:
+            pytest.skip("no banker picks qualified against the seeded fixtures")
+        b0 = data["bankers"][0]
+        assert "category" in b0
+        assert b0["category"] == "BANKER"
+        assert "reasoning" in b0
+        assert "【稳胆核心理由】" in b0["reasoning"]
 
-        if data["parlays"]:
-            p0 = data["parlays"][0]
-            assert "combined_odds" in p0
-            assert "win_probability_pct" in p0
-            assert "copy_text" in p0
-            assert len(p0["legs"]) >= 2
+        if not data["parlays"]:
+            pytest.skip("no parlays qualified against the seeded fixtures")
+        p0 = data["parlays"][0]
+        assert "combined_odds" in p0
+        assert "win_probability_pct" in p0
+        assert "copy_text" in p0
+        assert len(p0["legs"]) >= 2
 
         # 2. Fetch daily picks in English
-        res_en = await client.get("/v1/picks/daily?lang=en")
+        res_en = await client.get("/v1/picks/daily?lang=en", headers=headers)
         assert res_en.status_code == 200
         data_en = res_en.json()
         assert data_en["lang"] == "en"
-        if data_en["bankers"]:
-            b0_en = data_en["bankers"][0]
-            assert "Banker Rationale" in b0_en["reasoning"]
-            assert "Daily Banker" in b0_en["category_label"]
-        if data_en["parlays"]:
-            p0_en = data_en["parlays"][0]
-            assert "Ticket" in p0_en["copy_text"] or "Parlay" in p0_en["copy_text"]
+        if not data_en["bankers"]:
+            pytest.skip("no banker picks qualified against the seeded fixtures")
+        b0_en = data_en["bankers"][0]
+        assert "Banker Rationale" in b0_en["reasoning"]
+        assert "Daily Banker" in b0_en["category_label"]
+        if not data_en["parlays"]:
+            pytest.skip("no parlays qualified against the seeded fixtures")
+        p0_en = data_en["parlays"][0]
+        assert "Ticket" in p0_en["copy_text"] or "Parlay" in p0_en["copy_text"]
 

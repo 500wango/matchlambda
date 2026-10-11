@@ -24,40 +24,21 @@ async def get_current_user_optional(
 
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise AppException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            code="UNAUTHENTICATED",
-            message="Invalid authorization header format.",
-        )
+        # Optional auth: a bad header must not block anonymous routes.
+        return None
 
     token = parts[1]
     payload = decode_access_token(token)
     if not payload or "sub" not in payload:
-        raise AppException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            code="UNAUTHENTICATED",
-            message="Invalid or expired access token.",
-        )
+        return None
 
     user_id_str = payload["sub"]
     try:
         user_uuid = uuid.UUID(user_id_str)
     except ValueError:
-        raise AppException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            code="UNAUTHENTICATED",
-            message="Invalid token subject.",
-        )
+        return None
 
-    user = await db.get(User, user_uuid)
-    if not user:
-        raise AppException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            code="UNAUTHENTICATED",
-            message="User not found.",
-        )
-
-    return user
+    return await db.get(User, user_uuid)
 
 
 async def get_current_user(
@@ -80,5 +61,17 @@ async def require_analyst_user(
             status_code=status.HTTP_403_FORBIDDEN,
             code="PASS_REQUIRED",
             message="An active analyst pass is required.",
+        )
+    return user
+
+
+async def require_admin_user(
+    user: User = Depends(get_current_user),
+) -> User:
+    if not getattr(user, "is_admin", False):
+        raise AppException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="FORBIDDEN",
+            message="Administrator privileges required.",
         )
     return user

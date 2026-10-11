@@ -1,14 +1,58 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Zap, TrendingUp, DollarSign, Filter, Sliders, Shield, ArrowUpRight, CheckCircle2, ChevronRight, Activity } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Zap, TrendingUp, Shield, ArrowUpRight, ChevronRight } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { useDebounced } from "@/lib/useDebounced";
+import { useEligibleLeagues, isLeagueVisible } from "@/lib/leagueGate";
+import { leagueShort } from "@/lib/leagues";
+
+interface MatchHint {
+  home?: string;
+  away?: string;
+  leagueId?: string;
+  matchDate?: string;
+}
 
 interface AlphaScannerViewProps {
   isAnalyst: boolean;
   onOpenPricing: () => void;
-  onSelectMatch: (matchId: string) => void;
+  onSelectMatch: (matchId: string, hint?: MatchHint) => void;
+}
+
+function fmtOdds(value: unknown): string {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n.toFixed(2) : "—";
+}
+
+function fmtPct(value: unknown, digits = 1): string {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? `${(n * 100).toFixed(digits)}%` : "—";
+}
+
+// The scanner API already returns ev_pct / edge_pct / half_kelly_pct as
+// percentage values (e.g. 5.2 means 5.2%), so they must not be re-scaled.
+function fmtPercentValue(value: unknown, digits = 2): string {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? `${n.toFixed(digits)}%` : "—";
+}
+
+function fmtSignedPercentValue(value: unknown, digits = 2): string {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `${n > 0 ? "+" : ""}${n.toFixed(digits)}%`;
+}
+
+function fmtMoney(value: unknown, digits = 2): string {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? `$${n.toFixed(digits)}` : "—";
+}
+
+function fmtSignedMoney(value: unknown, digits = 2): string {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `${n > 0 ? "+" : n < 0 ? "-" : ""}$${Math.abs(n).toFixed(digits)}`;
 }
 
 export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
@@ -17,32 +61,36 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
   onSelectMatch,
 }) => {
   const { lang, t } = useI18n();
+  // Language only affects copy, never the request; keep it in a ref so a
+  // language switch does not re-fire the scanner query.
+  const langRef = useRef(lang);
+  langRef.current = lang;
   const [signals, setSignals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter & Staking Inputs
-  const [bankroll, setBankroll] = useState<number>(5000);
+  // Filter & Staking Inputs. Bankroll text can be cleared while typing; blur clamps it.
+  const [bankrollInput, setBankrollInput] = useState("5000");
   const [strategy, setStrategy] = useState<string>("HALF_KELLY");
   const [minEv, setMinEv] = useState<number>(0.05);
   const [leagueFilter, setLeagueFilter] = useState<string>("ALL");
+  const eligibleLeagues = useEligibleLeagues();
+  const debouncedBankrollInput = useDebounced(bankrollInput, 400);
+  const debouncedMinEv = useDebounced(minEv, 400);
+  const bankrollForQuery = Number(debouncedBankrollInput);
 
-  const fetchSignals = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      let url = `/alpha/scanner?min_ev=${minEv}&bankroll=${bankroll}&strategy=${strategy}&limit=40`;
-      if (leagueFilter && leagueFilter !== "ALL") {
-        url += `&league_id=${leagueFilter}`;
-      }
-      const data = await apiRequest<any>(url);
-      setSignals(data.signals || []);
-    } catch (err: any) {
-      setError(err?.message || (lang === "zh" ? "无法加载量化信号。" : "Failed to scan alpha signals."));
-    } finally {
-      setLoading(false);
+  // PRD §2.1: drop the active filter when its league moves back to pending.
+  useEffect(() => {
+    if (leagueFilter !== "ALL" && !isLeagueVisible(leagueFilter, eligibleLeagues)) {
+      setLeagueFilter("ALL");
     }
-  }, [bankroll, strategy, minEv, leagueFilter, lang]);
+  }, [eligibleLeagues, leagueFilter]);
+
+  const commitBankroll = () => {
+    const n = Number(bankrollInput);
+    const clamped = Number.isFinite(n) ? Math.max(10, n) : 10;
+    setBankrollInput(String(clamped));
+  };
 
   useEffect(() => {
     if (!isAnalyst) {
@@ -50,8 +98,38 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
       setSignals([]);
       return;
     }
-    fetchSignals();
-  }, [fetchSignals, isAnalyst]);
+    if (!Number.isFinite(bankrollForQuery) || bankrollForQuery < 10) {
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams({
+      min_ev: String(debouncedMinEv),
+      bankroll: String(bankrollForQuery),
+      strategy,
+      limit: "40",
+    });
+    if (leagueFilter && leagueFilter !== "ALL") params.set("league_id", leagueFilter);
+    apiRequest<any>(`/alpha/scanner?${params.toString()}`, { signal: controller.signal })
+      .then((data) => {
+        if (!active) return;
+        setSignals(data?.signals || []);
+      })
+      .catch((err: any) => {
+        if (!active || controller.signal.aborted || err?.code === "ABORTED") return;
+        setError(err?.message || (langRef.current === "zh" ? "无法加载量化信号。" : "Failed to scan alpha signals."));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort(new Error("Alpha scanner unmounted"));
+    };
+  }, [isAnalyst, bankrollForQuery, debouncedMinEv, strategy, leagueFilter]);
 
   const isEn = lang === "en";
 
@@ -96,8 +174,9 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
                 <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-xs">$</span>
                 <input
                   type="number"
-                  value={bankroll}
-                  onChange={(e) => setBankroll(Math.max(10, Number(e.target.value)))}
+                  value={bankrollInput}
+                  onChange={(e) => setBankrollInput(e.target.value)}
+                  onBlur={commitBankroll}
                   className="w-28 pl-6 pr-2 py-1.5 bg-[#0f1523] border border-gray-700 rounded-lg text-white font-mono text-xs font-bold focus:border-blue-500 focus:outline-none"
                 />
               </div>
@@ -153,9 +232,13 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
 
           {/* League quick filter */}
           <div className="flex items-center space-x-1.5 overflow-x-auto text-xs font-mono">
-            {["ALL", "TOP5", "EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "UCL", "UEL", "ALLSVENSKAN", "ELITESERIEN", "SUPERLIGA", "AUSTRIAN_BUNDESLIGA", "CHAMPIONSHIP", "EREDIVISIE", "PRIMEIRA_LIGA", "MLS", "BRASILEIRAO", "SAUDI_PRO_LEAGUE"].map((l) => (
+            {["ALL", "TOP5", "EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "UCL", "UEL", "ALLSVENSKAN", "ELITESERIEN", "SUPERLIGA", "AUSTRIAN_BUNDESLIGA", "CHAMPIONSHIP", "EREDIVISIE", "PRIMEIRA_LIGA", "MLS", "BRASILEIRAO", "SAUDI_PRO_LEAGUE"]
+              .filter((l) => isLeagueVisible(l, eligibleLeagues))
+              .map((l) => (
               <button
                 key={l}
+                type="button"
+                aria-pressed={leagueFilter === l}
                 onClick={() => setLeagueFilter(l)}
                 className={`px-2.5 py-1 rounded-lg transition whitespace-nowrap ${
                   leagueFilter === l
@@ -163,7 +246,7 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
                     : "bg-[#090d16] text-gray-400 hover:text-white border border-gray-800"
                 }`}
               >
-                {l === "ALL" ? (isEn ? "All" : "全部") : l === "TOP5" ? (isEn ? "Top 5" : "五大联赛") : l}
+                {leagueShort(l)}
               </button>
             ))}
           </div>
@@ -241,10 +324,10 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
                       {/* Odds */}
                       <td className="py-3.5 px-4">
                         <div className="text-white font-bold text-sm">
-                          {sig.market_odds.toFixed(2)}
+                          {fmtOdds(sig.market_odds)}
                         </div>
                         <div className="text-[10px] text-gray-400">
-                          {isEn ? "Fair" : "公允"}: {sig.fair_odds.toFixed(2)} ({isEn ? "Win" : "胜率"} {(sig.model_prob * 100).toFixed(1)}%)
+                          {isEn ? "Fair" : "公允"}: {fmtOdds(sig.fair_odds)} ({isEn ? "Win" : "胜率"} {fmtPct(sig.model_prob)})
                         </div>
                       </td>
 
@@ -252,27 +335,27 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
                       <td className="py-3.5 px-4">
                         <span className="inline-flex items-center px-2 py-0.5 rounded font-black text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                           <ArrowUpRight className="w-3.5 h-3.5 mr-0.5" />
-                          +{sig.ev_pct}%
+                          {fmtSignedPercentValue(sig.ev_pct, 1)}
                         </span>
                         <div className="text-[10px] text-gray-400 mt-0.5">
-                          Edge: +{sig.edge_pct}%
+                          {t("scanner.edge")}: {fmtSignedPercentValue(sig.edge_pct)}
                         </div>
                       </td>
 
                       {/* Suggested Stake */}
                       <td className="py-3.5 px-4">
                         <div className="font-bold text-white text-sm">
-                          ${sig.suggested_stake}
+                          {fmtMoney(sig.suggested_stake)}
                         </div>
                         <div className="text-[10px] text-gray-400">
-                          {sig.half_kelly_pct}% {isEn ? "Bankroll" : "本金"}
+                          {fmtPercentValue(sig.half_kelly_pct)} {isEn ? "Bankroll" : "本金"}
                         </div>
                       </td>
 
                       {/* Expected Profit */}
                       <td className="py-3.5 px-4">
                         <div className="font-bold text-emerald-400 text-sm">
-                          +${sig.expected_profit}
+                          {fmtSignedMoney(sig.expected_profit)}
                         </div>
                         <div className="text-[10px] text-gray-500">
                           {isEn ? "Expected EV" : "按模型期望"}
@@ -282,7 +365,14 @@ export const AlphaScannerView: React.FC<AlphaScannerViewProps> = ({
                       {/* Action */}
                       <td className="py-3.5 px-4 text-right">
                         <button
-                          onClick={() => onSelectMatch(sig.match_id)}
+                          onClick={() =>
+                            onSelectMatch(sig.match_id, {
+                              home: sig.home_team,
+                              away: sig.away_team,
+                              leagueId: sig.league_id,
+                              matchDate: sig.match_date,
+                            })
+                          }
                           className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white transition text-xs font-semibold inline-flex items-center"
                         >
                           {isEn ? "Quant Dive" : "深度分析"} <ChevronRight className="w-3.5 h-3.5 ml-1" />

@@ -1,3 +1,5 @@
+.env
+.env.*
 node_modules
 .next
 out
@@ -5,3 +7,4 @@ out
 .vscode
 .idea
 *.log
+npm-debug.log*

@@ -1,7 +1,12 @@
-# Local development only; application Dockerfiles are not present yet.
+# Local development stack. The image Dockerfiles are production-shaped
+# (no reload, non-root, migrations behind RUN_MIGRATIONS). This file
+# overrides the API and web commands so the bind-mounted tree reloads.
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.0"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mlq_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
@@ -18,6 +23,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: "0.5"
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
@@ -30,12 +38,15 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.0"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./backend:/app
       - ./data:/app/data:ro
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
@@ -45,18 +56,48 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
       APP_ORIGIN: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Docs are opt-in even locally: enable with SHOW_DOCS=true docker compose up
+      # Never enable in a real deployment.
+      SHOW_DOCS: ${SHOW_DOCS:-false}
+      # Allow browser origins on localhost; production keeps this false.
+      ALLOW_LOCAL_ORIGINS: "true"
+      RUN_MIGRATIONS: "1"
       NOWPAYMENTS_API_KEY: ${NOWPAYMENTS_API_KEY:-}
       NOWPAYMENTS_IPN_SECRET: ${NOWPAYMENTS_IPN_SECRET:-}
       NOWPAYMENTS_IPN_CALLBACK_URL: ${NOWPAYMENTS_IPN_CALLBACK_URL:-}
+      PAYMENTS_SANDBOX_MODE: ${PAYMENTS_SANDBOX_MODE:-false}
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+      THE_ODDS_API_KEY: ${THE_ODDS_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 25s
 
   celery_worker:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.0"
     command: celery -A app.core.celery worker --loglevel=info
+    # Overrides the base image's healthcheck, which curls the API port this
+    # container does not serve (it reported a healthy worker as unhealthy).
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d celery@$$HOSTNAME --timeout 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     volumes:
       - ./backend:/app
       - ./data:/app/data:ro
@@ -66,7 +107,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-mlq_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-matchlambda}
-      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       THE_ODDS_API_KEY: ${THE_ODDS_API_KEY:-}
     depends_on:
@@ -79,12 +120,21 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A app.core.celery beat --loglevel=info
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: "0.25"
+    command: celery -A app.core.celery beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    # The base image's healthcheck probes the API port, which beat does not
+    # serve. Beat owns no worker node to ping, so process liveness plus
+    # `restart: unless-stopped` is the meaningful signal; turn the probe off
+    # rather than report a running scheduler as unhealthy forever.
+    healthcheck:
+      disable: true
     volumes:
       - ./backend:/app
     environment:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
     depends_on:
       redis:
         condition: service_healthy
@@ -93,18 +143,48 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # `npm run dev` needs the toolchain that the runtime stage prunes on
+      # purpose (tailwind, postcss, autoprefixer, typescript), so local dev
+      # runs the builder stage instead of the production stage.
+      target: build
+    # Dev-only tag. Without it `docker compose build` would retag the hardened
+    # production image (non-root, pruned) as matchlambda-web, silently losing it.
+    image: matchlambda-web-dev
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.0"
     command: npm run dev -- --hostname 0.0.0.0
+    # The bind-mounted tree belongs to the host user, so run as that uid:gid.
+    # The image's own appuser (10001) cannot create /app/.next here, and a
+    # root-run dev server would leave root-owned files in the host tree.
+    # Override with WEB_UID/WEB_GID if your account is not 1000:1000.
+    user: "${WEB_UID:-1000}:${WEB_GID:-1000}"
     volumes:
       - ./frontend:/app
+      # Anonymous volume: take node_modules from the image, not the host tree.
+      # Refresh it with `docker compose up -d -V web` after editing package.json.
       - /app/node_modules
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    # The builder stage carries no HEALTHCHECK (only the runtime stage does),
+    # so the dev container declares its own.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     environment:
+      # HOME and the npm cache point at /tmp because the image's HOME
+      # (/home/appuser) belongs to uid 10001, which this container no longer is.
+      HOME: /tmp
+      npm_config_cache: /tmp/.npm
       NODE_ENV: development
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000/v1}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:

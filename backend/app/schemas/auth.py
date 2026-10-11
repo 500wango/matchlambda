@@ -21,7 +21,9 @@ class RegisterResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    # Cap the length so an oversized password cannot amplify the argon2
+    # (64MiB/attempt) verification cost.
+    password: str = Field(max_length=128)
 
     @field_validator("email")
     @classmethod
@@ -40,3 +42,4 @@ class UserResponse(BaseModel):
     email: str
     effective_plan: str
     plan_expires_at: Optional[datetime] = None
+    is_admin: bool = False

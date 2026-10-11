@@ -54,7 +54,10 @@ def calculate_shin_probabilities(odds: List[float]) -> Tuple[List[float], float,
     # sum(pi_i^2) / S < (sum pi_i)^2 / S = S^2 / S = S. In fact sum(pi_i^2)/S < 1.
     f1 = objective(1.0 - 1e-10)
 
-    if f0 * f1 > 0:
+    # Bracket check by comparing signs rather than the product. Near S -> 1+ the
+    # objective values are tiny and f0 * f1 can underflow to 0, which would look
+    # like "not bracketed"; the sign comparison stays correct there.
+    if (f0 > 0.0) == (f1 > 0.0):
         raise ValueError("Shin root is not bracketed for this quote.")
 
     z_root = brentq(objective, 0.0, 1.0 - 1e-10, xtol=1e-12, rtol=1e-12)
@@ -67,7 +70,10 @@ def calculate_shin_probabilities(odds: List[float]) -> Tuple[List[float], float,
     if any(not math.isfinite(p) or p < 0.0 or p > 1.0 for p in probs):
         raise ValueError("Shin probabilities are outside [0, 1].")
 
-    # Verify residual and sum error <= 1e-10
+    # Verify root residual and sum error <= 1e-10
+    residual = abs(objective(z_root))
+    if residual > 1e-10:
+        raise ValueError(f"Shin root residual {residual} > 1e-10")
     sum_p = sum(probs)
     if abs(sum_p - 1.0) > 1e-10:
         raise ValueError(f"Shin probabilities sum error {abs(sum_p - 1.0)} > 1e-10")

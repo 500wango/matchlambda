@@ -1,21 +1,18 @@
 import uuid
 import pytest
-import hmac
-import hashlib
-from datetime import datetime, timezone
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.core.config import settings
-from app.services.nowpayments import canonical_json_dumps
+from tests.ipn_sign import independent_ipn_signature
 
 
 @pytest.mark.asyncio
-async def test_complete_user_analyst_journey():
+async def test_complete_user_analyst_journey(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Mock payment keys for test
-        settings.NOWPAYMENTS_API_KEY = "sandbox_test_key"
-        settings.NOWPAYMENTS_IPN_SECRET = "secret_for_e2e_journey_test"
+        monkeypatch.setattr(settings, "NOWPAYMENTS_API_KEY", "sandbox_test_key")
+        monkeypatch.setattr(settings, "PAYMENTS_SANDBOX_MODE", True)
+        monkeypatch.setattr(settings, "NOWPAYMENTS_IPN_SECRET", "secret_for_e2e_journey_test")
 
         # 1. Anonymous user explores fixtures
         res = await client.get("/v1/matches/fixtures?league_id=EPL&days_ahead=14")
@@ -82,13 +79,9 @@ async def test_complete_user_analyst_journey():
             "order_id": order_id,
             "payment_status": "finished",
             "payment_id": payment_id,
+            "pay_currency": "USDTTRC20",
         }
-        canon_json = canonical_json_dumps(webhook_payload)
-        sig = hmac.new(
-            settings.NOWPAYMENTS_IPN_SECRET.encode(),
-            canon_json.encode(),
-            hashlib.sha512,
-        ).hexdigest()
+        sig = independent_ipn_signature(webhook_payload, settings.NOWPAYMENTS_IPN_SECRET)
 
         res_webhook = await client.post(
             "/v1/payments/webhook",
@@ -131,12 +124,13 @@ async def test_complete_user_analyst_journey():
         analysis = res_analysis.json()
         assert analysis["match_id"] == match_id
         assert analysis["data_status"] in ("AVAILABLE", "STALE", "UNAVAILABLE")
-        if analysis["prediction"]:
-            pred = analysis["prediction"]
-            assert "score_matrix" in pred
-            assert len(pred["score_matrix"]) == 6
-            assert len(pred["score_matrix"][0]) == 6
-            assert "omitted_mass" in pred
-            assert "top_scores" in pred
-            assert len(pred["top_scores"]) == 3
-            assert pred["prob_home_win"] + pred["prob_draw"] + pred["prob_away_win"] == pytest.approx(1.0, abs=1e-6)
+        if not analysis["prediction"]:
+            pytest.skip("seeded demo fixtures carry no stored prediction snapshot")
+        pred = analysis["prediction"]
+        assert "score_matrix" in pred
+        assert len(pred["score_matrix"]) == 6
+        assert len(pred["score_matrix"][0]) == 6
+        assert "omitted_mass" in pred
+        assert "top_scores" in pred
+        assert len(pred["top_scores"]) == 3
+        assert pred["prob_home_win"] + pred["prob_draw"] + pred["prob_away_win"] == pytest.approx(1.0, abs=1e-6)

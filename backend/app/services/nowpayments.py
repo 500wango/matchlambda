@@ -23,7 +23,7 @@ def canonical_json_dumps(data: Dict[str, Any]) -> str:
     Serializes data to canonical JSON representation with sorted keys and no extraneous whitespace.
     """
     sorted_data = sort_json_keys(data)
-    return json.dumps(sorted_data, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps(sorted_data, separators=(",", ":"), ensure_ascii=True)
 
 
 def verify_nowpayments_signature(payload_data: Dict[str, Any], signature: str, secret: str) -> bool:

@@ -3,6 +3,7 @@
 import React from "react";
 import { Clock, TrendingUp, Shield, ChevronRight, AlertCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { LEAGUE_LABELS, leagueLabel } from "@/lib/leagues";
 
 interface FixtureCardProps {
   fixture: any;
@@ -11,25 +12,14 @@ interface FixtureCardProps {
   onUpgrade: () => void;
 }
 
-const LEAGUE_LABELS: Record<string, { zh: string; en: string; badge: string }> = {
-  EPL: { zh: "英超 Premier League", en: "Premier League", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
-  LA_LIGA: { zh: "西甲 La Liga", en: "La Liga", badge: "🇪🇸" },
-  SERIE_A: { zh: "意甲 Serie A", en: "Serie A", badge: "🇮🇹" },
-  BUNDESLIGA: { zh: "德甲 Bundesliga", en: "Bundesliga", badge: "🇩🇪" },
-  LIGUE_1: { zh: "法甲 Ligue 1", en: "Ligue 1", badge: "🇫🇷" },
-  ALLSVENSKAN: { zh: "瑞超 Allsvenskan", en: "Allsvenskan", badge: "🇸🇪" },
-  ELITESERIEN: { zh: "挪超 Eliteserien", en: "Eliteserien", badge: "🇳🇴" },
-  SUPERLIGA: { zh: "丹麦超 Superliga", en: "Superliga", badge: "🇩🇰" },
-  AUSTRIAN_BUNDESLIGA: { zh: "奥甲/奥超 Bundesliga", en: "Austrian Bundesliga", badge: "🇦🇹" },
-  CHAMPIONSHIP: { zh: "英冠 Championship", en: "Championship", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
-  EREDIVISIE: { zh: "荷甲 Eredivisie", en: "Eredivisie", badge: "🇳🇱" },
-  PRIMEIRA_LIGA: { zh: "葡超 Primeira Liga", en: "Primeira Liga", badge: "🇵🇹" },
-  MLS: { zh: "美职联 MLS", en: "MLS", badge: "🇺🇸" },
-  BRASILEIRAO: { zh: "巴西甲 Brasileirão", en: "Brasileirão", badge: "🇧🇷" },
-  SAUDI_PRO_LEAGUE: { zh: "沙特联 Saudi Pro", en: "Saudi Pro", badge: "🇸🇦" },
-  UCL: { zh: "欧冠 Champions League", en: "Champions League", badge: "⭐" },
-  UEL: { zh: "欧联 Europa League", en: "Europa League", badge: "🏆" },
-};
+function readProb(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function clampPct(prob: number | null): number {
+  if (prob == null) return 0;
+  return Math.min(100, Math.max(0, prob * 100));
+}
 
 export const FixtureCard: React.FC<FixtureCardProps> = ({
   fixture,
@@ -55,8 +45,20 @@ export const FixtureCard: React.FC<FixtureCardProps> = ({
   const comp = fixture.comparison;
   const hasValue = comp?.has_value;
   const leagueObj = LEAGUE_LABELS[fixture.league_id];
-  const leagueName = isEn ? (leagueObj?.en || fixture.league_id) : (leagueObj?.zh || fixture.league_id);
+  const leagueName = leagueLabel(fixture.league_id, isEn ? "en" : "zh");
   const leagueBadge = leagueObj?.badge || "⚽";
+  const homeP = readProb(pred?.prob_home_win);
+  const drawP = readProb(pred?.prob_draw);
+  const awayP = readProb(pred?.prob_away_win);
+  const parts = [clampPct(homeP), clampPct(drawP), clampPct(awayP)];
+  const shareSum = parts[0] + parts[1] + parts[2];
+  const widths =
+    shareSum > 0 && Number.isFinite(shareSum)
+      ? parts.map((part) => (part / shareSum) * 100)
+      : [0, 0, 0];
+  const fmtProb = (prob: number | null) => (prob == null ? "—" : `${(prob * 100).toFixed(1)}%`);
+  const fmtTeam = (name: unknown, fallback: string) =>
+    typeof name === "string" && name.trim() !== "" ? name : fallback;
 
   return (
     <div className="bg-[#111726] border border-gray-800/80 hover:border-gray-700 rounded-xl p-5 transition shadow-lg relative group">
@@ -77,7 +79,9 @@ export const FixtureCard: React.FC<FixtureCardProps> = ({
       {/* Teams */}
       <div className="flex items-center justify-between mb-5">
         <div className="w-5/12 text-left">
-          <h4 className="font-bold text-white text-base truncate">{fixture.home_team.name}</h4>
+          <h4 className="font-bold text-white text-base truncate">
+            {fmtTeam(fixture?.home_team?.name, isEn ? "Home Team" : "主队")}
+          </h4>
           <span className="text-[11px] text-gray-500 font-mono">{isEn ? "HOME" : "主场"}</span>
         </div>
 
@@ -86,7 +90,9 @@ export const FixtureCard: React.FC<FixtureCardProps> = ({
         </div>
 
         <div className="w-5/12 text-right">
-          <h4 className="font-bold text-white text-base truncate">{fixture.away_team.name}</h4>
+          <h4 className="font-bold text-white text-base truncate">
+            {fmtTeam(fixture?.away_team?.name, isEn ? "Away Team" : "客队")}
+          </h4>
           <span className="text-[11px] text-gray-500 font-mono">{isEn ? "AWAY" : "客场"}</span>
         </div>
       </div>
@@ -97,26 +103,26 @@ export const FixtureCard: React.FC<FixtureCardProps> = ({
           <div className="space-y-3 pt-2">
             {/* Probability Bars */}
             <div className="flex items-center justify-between text-xs font-mono text-gray-300">
-              <span className="text-blue-400 font-bold">{(pred.prob_home_win * 100).toFixed(1)}%</span>
-              <span className="text-gray-400">{(pred.prob_draw * 100).toFixed(1)}%</span>
-              <span className="text-indigo-400 font-bold">{(pred.prob_away_win * 100).toFixed(1)}%</span>
+              <span className="text-blue-400 font-bold">{fmtProb(homeP)}</span>
+              <span className="text-gray-400">{fmtProb(drawP)}</span>
+              <span className="text-indigo-400 font-bold">{fmtProb(awayP)}</span>
             </div>
 
             <div className="h-2 w-full bg-gray-900 rounded-full flex overflow-hidden">
               <div
-                style={{ width: `${pred.prob_home_win * 100}%` }}
+                style={{ width: `${widths[0]}%` }}
                 className="bg-blue-500"
-                title={`Home Win: ${(pred.prob_home_win * 100).toFixed(1)}%`}
+                title={`Home Win: ${fmtProb(homeP)}`}
               />
               <div
-                style={{ width: `${pred.prob_draw * 100}%` }}
+                style={{ width: `${widths[1]}%` }}
                 className="bg-gray-600"
-                title={`Draw: ${(pred.prob_draw * 100).toFixed(1)}%`}
+                title={`Draw: ${fmtProb(drawP)}`}
               />
               <div
-                style={{ width: `${pred.prob_away_win * 100}%` }}
+                style={{ width: `${widths[2]}%` }}
                 className="bg-indigo-500"
-                title={`Away Win: ${(pred.prob_away_win * 100).toFixed(1)}%`}
+                title={`Away Win: ${fmtProb(awayP)}`}
               />
             </div>
 

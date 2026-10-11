@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
     String, Boolean, Integer, Numeric, Float, Text, ForeignKey,
-    DateTime, CheckConstraint, UniqueConstraint, Index
+    DateTime, CheckConstraint, UniqueConstraint, Index, text, desc,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -43,7 +43,7 @@ class TeamAlias(Base):
     external_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     external_name: Mapped[str] = mapped_column(String(128), nullable=False)
     country: Mapped[str] = mapped_column(String(64), nullable=False)
-    team_id: Mapped[str] = mapped_column(String(64), ForeignKey("teams.id"), nullable=False)
+    team_id: Mapped[str] = mapped_column(String(64), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
 
     team: Mapped["Team"] = relationship("Team", back_populates="aliases")
 
@@ -66,7 +66,12 @@ class Match(Base):
     home_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     away_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     result_available_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     league: Mapped["League"] = relationship("League", back_populates="matches")
     home_team: Mapped["Team"] = relationship("Team", foreign_keys=[home_team_id], back_populates="home_matches")
@@ -86,6 +91,7 @@ class Match(Base):
         ),
         Index("idx_matches_date_league", "match_date", "league_id"),
         Index("idx_matches_teams", "home_team_id", "away_team_id"),
+        Index("idx_matches_status_date", "status", "match_date"),
     )
 
 
@@ -94,7 +100,7 @@ class MatchSource(Base):
 
     source_name: Mapped[str] = mapped_column(String(32), primary_key=True)
     external_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    match_id: Mapped[str] = mapped_column(String(64), ForeignKey("matches.id"), nullable=False)
+    match_id: Mapped[str] = mapped_column(String(64), ForeignKey("matches.id", ondelete="CASCADE"), nullable=False)
 
     match: Mapped["Match"] = relationship("Match", back_populates="sources")
 
@@ -103,7 +109,7 @@ class OddsSnapshot(Base):
     __tablename__ = "odds_snapshots"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    match_id: Mapped[str] = mapped_column(String(64), ForeignKey("matches.id"), nullable=False)
+    match_id: Mapped[str] = mapped_column(String(64), ForeignKey("matches.id", ondelete="CASCADE"), nullable=False)
     source_name: Mapped[str] = mapped_column(String(32), nullable=False)
     bookmaker: Mapped[str] = mapped_column(String(32), nullable=False)
     quote_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -152,8 +158,14 @@ class ModelParameter(Base):
     predictions: Mapped[List["Prediction"]] = relationship("Prediction", back_populates="model_parameters")
 
     __table_args__ = (
-        CheckConstraint("xi_decay >= 0", name="chk_model_xi_decay"),
+        # A deterministic training_data_ref means identical training data must
+        # resolve to a single parameter row per league: the DB enforces that so
+        # re-training can never grow the table without bound.
+        UniqueConstraint("league_id", "training_data_ref", name="uq_model_param_league_ref"),
+        CheckConstraint("xi_decay >= 0 AND xi_decay < 'Infinity'::float8", name="chk_model_xi_decay"),
         CheckConstraint("training_cutoff <= calculated_at", name="chk_model_training_cutoff"),
+        CheckConstraint("jsonb_typeof(team_attack) = 'object'", name="chk_model_team_attack_object"),
+        CheckConstraint("jsonb_typeof(team_defense) = 'object'", name="chk_model_team_defense_object"),
     )
 
 
@@ -161,7 +173,7 @@ class Prediction(Base):
     __tablename__ = "predictions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    match_id: Mapped[str] = mapped_column(String(64), ForeignKey("matches.id"), nullable=False)
+    match_id: Mapped[str] = mapped_column(String(64), ForeignKey("matches.id", ondelete="CASCADE"), nullable=False)
     model_parameters_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("model_parameters.id"), nullable=False)
     odds_snapshot_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("odds_snapshots.id"), nullable=True)
     as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -182,8 +194,8 @@ class Prediction(Base):
 
     __table_args__ = (
         UniqueConstraint("match_id", "as_of", name="uq_prediction_match_as_of"),
-        CheckConstraint("lambda_home > 0", name="chk_prediction_lambda_home"),
-        CheckConstraint("mu_away > 0", name="chk_prediction_mu_away"),
+        CheckConstraint("lambda_home > 0 AND lambda_home < 'Infinity'::float8", name="chk_prediction_lambda_home"),
+        CheckConstraint("mu_away > 0 AND mu_away < 'Infinity'::float8", name="chk_prediction_mu_away"),
         CheckConstraint("prob_home_win BETWEEN 0 AND 1", name="chk_prediction_prob_home"),
         CheckConstraint("prob_draw BETWEEN 0 AND 1", name="chk_prediction_prob_draw"),
         CheckConstraint("prob_away_win BETWEEN 0 AND 1", name="chk_prediction_prob_away"),
@@ -191,6 +203,8 @@ class Prediction(Base):
         CheckConstraint("as_of < kickoff_at_prediction", name="chk_prediction_as_of_kickoff"),
         CheckConstraint("as_of <= generated_at AND generated_at < kickoff_at_prediction", name="chk_prediction_generated_at"),
         CheckConstraint("ABS(prob_home_win + prob_draw + prob_away_win - 1) <= 1e-8", name="chk_prediction_prob_sum"),
+        CheckConstraint("jsonb_typeof(score_matrix) = 'array'", name="chk_prediction_score_matrix_array"),
+        CheckConstraint("jsonb_typeof(top_scores) = 'array'", name="chk_prediction_top_scores_array"),
         Index("idx_predictions_match_time", "match_id", as_of.desc()),
     )
 
@@ -203,11 +217,13 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     plan_tier: Mapped[str] = mapped_column(String(16), default="FREE", nullable=False)
     plan_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     invoices: Mapped[List["CryptoInvoice"]] = relationship("CryptoInvoice", back_populates="user")
 
     __table_args__ = (
+        CheckConstraint("email = LOWER(BTRIM(email))", name="users_email_check"),
         CheckConstraint("plan_tier IN ('FREE', 'ANALYST')", name="chk_user_plan_tier"),
         CheckConstraint("plan_tier <> 'ANALYST' OR plan_expires_at IS NOT NULL", name="chk_user_analyst_expires"),
     )
@@ -231,16 +247,24 @@ class CryptoInvoice(Base):
     payment_status: Mapped[str] = mapped_column(String(16), default="CREATING", nullable=False)
     credited_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     user: Mapped["User"] = relationship("User", back_populates="invoices")
 
     __table_args__ = (
         UniqueConstraint("user_id", "request_key", name="uq_invoice_user_request"),
-        CheckConstraint("plan_type IN ('PRO_MONTHLY', 'PRO_SEASON')", name="chk_invoice_plan_type"),
+        CheckConstraint("plan_type IN ('PRO_DAY', 'PRO_WEEK', 'PRO_MONTHLY', 'PRO_SEASON')", name="chk_invoice_plan_type"),
         CheckConstraint("amount_usd > 0 AND amount_usd < 1000000", name="chk_invoice_amount"),
         CheckConstraint(
-            "(plan_type = 'PRO_MONTHLY' AND duration_days = 30) OR (plan_type = 'PRO_SEASON' AND duration_days = 270)",
+            "(plan_type = 'PRO_DAY' AND duration_days = 1) "
+            "OR (plan_type = 'PRO_WEEK' AND duration_days = 7) "
+            "OR (plan_type = 'PRO_MONTHLY' AND duration_days = 30) "
+            "OR (plan_type = 'PRO_SEASON' AND duration_days = 270)",
             name="chk_invoice_plan_duration"
         ),
         CheckConstraint(
@@ -253,3 +277,33 @@ class CryptoInvoice(Base):
             name="chk_invoice_paid_ids"
         ),
     )
+
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    admin_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    target: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_audit_logs_created_at", desc("created_at")),
+    )
+

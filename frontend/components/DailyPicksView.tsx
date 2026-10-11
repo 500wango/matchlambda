@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Sparkles,
   Shield,
@@ -23,32 +23,32 @@ import {
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { useEligibleLeagues, isLeagueVisible } from "@/lib/leagueGate";
+import { LEAGUE_LABELS, leagueLabel } from "@/lib/leagues";
+
+interface MatchHint {
+  home?: string;
+  away?: string;
+  leagueId?: string;
+  matchDate?: string;
+}
 
 interface DailyPicksViewProps {
   isAnalyst: boolean;
   onOpenPricing: () => void;
-  onSelectMatch: (matchId: string) => void;
+  onSelectMatch: (matchId: string, hint?: MatchHint) => void;
 }
 
-const LEAGUE_LABELS: Record<string, { zh: string; en: string; badge: string }> = {
-  EPL: { zh: "英超", en: "Premier League", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
-  LA_LIGA: { zh: "西甲", en: "La Liga", badge: "🇪🇸" },
-  SERIE_A: { zh: "意甲", en: "Serie A", badge: "🇮🇹" },
-  BUNDESLIGA: { zh: "德甲", en: "Bundesliga", badge: "🇩🇪" },
-  LIGUE_1: { zh: "法甲", en: "Ligue 1", badge: "🇫🇷" },
-  ALLSVENSKAN: { zh: "瑞超", en: "Allsvenskan", badge: "🇸🇪" },
-  ELITESERIEN: { zh: "挪超", en: "Eliteserien", badge: "🇳🇴" },
-  SUPERLIGA: { zh: "丹麦超", en: "Superliga", badge: "🇩🇰" },
-  AUSTRIAN_BUNDESLIGA: { zh: "奥甲", en: "Austrian Bundesliga", badge: "🇦🇹" },
-  CHAMPIONSHIP: { zh: "英冠", en: "Championship", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
-  EREDIVISIE: { zh: "荷甲", en: "Eredivisie", badge: "🇳🇱" },
-  PRIMEIRA_LIGA: { zh: "葡超", en: "Primeira Liga", badge: "🇵🇹" },
-  MLS: { zh: "美职联", en: "MLS", badge: "🇺🇸" },
-  BRASILEIRAO: { zh: "巴西甲", en: "Brasileirão", badge: "🇧🇷" },
-  SAUDI_PRO_LEAGUE: { zh: "沙特联", en: "Saudi Pro", badge: "🇸🇦" },
-  UCL: { zh: "欧冠", en: "Champions League", badge: "⭐" },
-  UEL: { zh: "欧联", en: "Europa League", badge: "🏆" },
-};
+function fmtOdds(value: unknown): string {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n.toFixed(2) : "—";
+}
+
+function formatModelPct(value: unknown): string {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `${(n * 100).toFixed(1)}%`;
+}
 
 export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
   isAnalyst,
@@ -60,39 +60,72 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const copyTimer = useRef<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const seqRef = useRef(0);
 
   // Filter states
   const [selectedCategory, setSelectedCategory] = useState<
     "ALL" | "BANKER" | "VALUE" | "UNDERDOG" | "GOALS" | "PARLAYS"
   >("ALL");
   const [selectedLeague, setSelectedLeague] = useState<string>("ALL");
+  const eligibleLeagues = useEligibleLeagues();
+
+  // PRD §2.1: a league reverting to pending clears a stale local selection.
+  useEffect(() => {
+    if (selectedLeague !== "ALL" && !isLeagueVisible(selectedLeague, eligibleLeagues)) {
+      setSelectedLeague("ALL");
+    }
+  }, [eligibleLeagues, selectedLeague]);
 
   const fetchPicks = useCallback(async () => {
+    abortRef.current?.abort(new Error("Superseded"));
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const seq = ++seqRef.current;
     setLoading(true);
     setError(null);
     try {
-      let query = `/picks/daily?days_ahead=10&lang=${lang}`;
-      if (selectedLeague && selectedLeague !== "ALL") {
-        query += `&league_id=${selectedLeague}`;
-      }
-      const res = await apiRequest<any>(query);
+      const params = new URLSearchParams({ days_ahead: "10", lang });
+      if (selectedLeague && selectedLeague !== "ALL") params.set("league_id", selectedLeague);
+      const res = await apiRequest<any>(`/picks/daily?${params.toString()}`, {
+        signal: controller.signal,
+      });
+      if (seq !== seqRef.current) return;
       setData(res);
     } catch (err: any) {
+      if (seq !== seqRef.current || controller.signal.aborted || err?.code === "ABORTED") return;
       setError(err?.message || (lang === "zh" ? "获取智能推荐失败，请重试。" : "Failed to load smart picks."));
     } finally {
-      setLoading(false);
+      if (seq === seqRef.current) setLoading(false);
     }
   }, [selectedLeague, lang]);
 
   useEffect(() => {
     fetchPicks();
+    return () => {
+      seqRef.current += 1;
+      abortRef.current?.abort(new Error("Component unmounted"));
+    };
   }, [fetchPicks]);
 
-  const handleCopyText = (id: string, text: string) => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text);
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current != null) window.clearTimeout(copyTimer.current);
+    };
+  }, []);
+
+  const handleCopyText = async (id: string, text: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard");
+      await navigator.clipboard.writeText(text);
+      setCopyError(null);
       setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2500);
+      if (copyTimer.current != null) window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopiedId(null), 2500);
+    } catch {
+      setCopyError(t("picks.copyFailed"));
     }
   };
 
@@ -110,7 +143,7 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
       ...(data.goals || []),
       ...(data.underdogs || []),
     ];
-    const seen = new Set();
+    const seen = new Set<string>();
     return allList.filter((item) => {
       if (seen.has(item.pick_id)) return false;
       seen.add(item.pick_id);
@@ -154,6 +187,8 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
         {/* Category Filter Pills */}
         <div className="mt-6 pt-5 border-t border-gray-800/80 flex flex-wrap items-center gap-2">
           <button
+            type="button"
+            aria-pressed={selectedCategory === "ALL"}
             onClick={() => setSelectedCategory("ALL")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
               selectedCategory === "ALL"
@@ -170,6 +205,8 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
           </button>
 
           <button
+            type="button"
+            aria-pressed={selectedCategory === "PARLAYS"}
             onClick={() => setSelectedCategory("PARLAYS")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
               selectedCategory === "PARLAYS"
@@ -179,12 +216,16 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
           >
             <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
             <span>{t("picks.parlays")}</span>
-            <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full font-mono">
-              3
-            </span>
+            {(data?.parlays?.length ?? 0) > 0 && (
+              <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full font-mono">
+                {data.parlays.length}
+              </span>
+            )}
           </button>
 
           <button
+            type="button"
+            aria-pressed={selectedCategory === "BANKER"}
             onClick={() => setSelectedCategory("BANKER")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
               selectedCategory === "BANKER"
@@ -200,6 +241,8 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
           </button>
 
           <button
+            type="button"
+            aria-pressed={selectedCategory === "VALUE"}
             onClick={() => setSelectedCategory("VALUE")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
               selectedCategory === "VALUE"
@@ -215,6 +258,8 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
           </button>
 
           <button
+            type="button"
+            aria-pressed={selectedCategory === "GOALS"}
             onClick={() => setSelectedCategory("GOALS")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
               selectedCategory === "GOALS"
@@ -230,6 +275,8 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
           </button>
 
           <button
+            type="button"
+            aria-pressed={selectedCategory === "UNDERDOG"}
             onClick={() => setSelectedCategory("UNDERDOG")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
               selectedCategory === "UNDERDOG"
@@ -263,9 +310,13 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
             { id: "LIGUE_1", name: t("leagues.ligue1") },
             { id: "CUPS", name: t("leagues.cups") },
             { id: "NORDIC", name: t("leagues.nordic") },
-          ].map((l) => (
+          ]
+            .filter((l) => isLeagueVisible(l.id, eligibleLeagues))
+            .map((l) => (
             <button
               key={l.id}
+              type="button"
+              aria-pressed={selectedLeague === l.id}
               onClick={() => setSelectedLeague(l.id)}
               className={`px-3 py-1.5 rounded-lg font-semibold transition whitespace-nowrap ${
                 selectedLeague === l.id
@@ -297,6 +348,10 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
             {t("picks.refreshBtn")}
           </button>
         </div>
+      )}
+
+      {copyError && (
+        <p className="text-xs text-red-400">{copyError}</p>
       )}
 
       {!loading && !error && (
@@ -373,7 +428,7 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                                     : "text-amber-400"
                                 }`}
                               >
-                                {parlay.combined_odds.toFixed(2)}x
+                                {fmtOdds(parlay.combined_odds)}x
                               </span>
                             </div>
                             <div className="text-right">
@@ -396,7 +451,7 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                             const leagueBadge = LEAGUE_LABELS[leg.league_id]?.badge || "⚽";
                             return (
                               <div
-                                key={idx}
+                                key={leg.match_id ?? `${leg.home_team}-${leg.away_team}-${idx}`}
                                 className="flex items-center justify-between text-xs py-1.5 px-2.5 rounded-lg bg-black/30 border border-gray-800/60"
                               >
                                 <div className="space-y-0.5 truncate mr-2">
@@ -413,7 +468,7 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                                 </div>
                                 <div className="text-right flex-shrink-0">
                                   <span className="px-2 py-0.5 rounded bg-gray-800 text-white font-mono font-bold">
-                                    @{leg.odds.toFixed(2)}
+                                    @{fmtOdds(leg.odds)}
                                   </span>
                                 </div>
                               </div>
@@ -488,7 +543,7 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                   {filteredPicks.map((pick: any) => {
                     const leagueObj = LEAGUE_LABELS[pick.league_id];
                     const leagueBadge = leagueObj?.badge || "⚽";
-                    const leagueName = lang === "zh" ? leagueObj?.zh || pick.league_id : leagueObj?.en || pick.league_id;
+                    const leagueName = leagueLabel(pick.league_id, lang === "zh" ? "zh" : "en");
                     const matchDate = new Date(pick.match_date);
                     const dateFormatted = matchDate.toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", {
                       month: "numeric",
@@ -533,7 +588,7 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
 
                           <div className="flex items-center space-x-3 text-gray-400">
                             <div className="flex items-center text-amber-400">
-                              {Array.from({ length: pick.confidence_stars || 4 }).map((_, i) => (
+                              {Array.from({ length: pick.confidence_stars ?? 4 }).map((_, i) => (
                                 <Star key={i} className="w-3.5 h-3.5 fill-current" />
                               ))}
                             </div>
@@ -553,7 +608,7 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                               {pick.home_team}
                             </h4>
                             <span className="text-[11px] text-gray-500 font-mono">
-                              {t("picks.expectedGoals")} {pick.expected_goals?.home || 1.0}
+                              {t("picks.expectedGoals")} {pick.expected_goals?.home ?? 1.0}
                             </span>
                           </div>
                           <div className="w-2/12 text-center text-xs font-mono font-bold text-gray-400 bg-gray-900/60 py-1 rounded">
@@ -564,7 +619,7 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                               {pick.away_team}
                             </h4>
                             <span className="text-[11px] text-gray-500 font-mono">
-                              {t("picks.expectedGoals")} {pick.expected_goals?.away || 1.0}
+                              {t("picks.expectedGoals")} {pick.expected_goals?.away ?? 1.0}
                             </span>
                           </div>
                         </div>
@@ -580,10 +635,10 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                                 {pick.selection_name}
                               </span>
                               {pick.market_odds == null ? (
-                                <span className="text-[10px] text-gray-400">{lang === "en" ? "Model estimate only" : "仅模型估计"}</span>
+                                <span className="text-[10px] text-gray-400">{t("picks.modelEstimateOnly")}</span>
                               ) : (
                                 <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-xs">
-                                  @{pick.market_odds.toFixed(2)}
+                                  @{fmtOdds(pick.market_odds)}
                                 </span>
                               )}
                             </div>
@@ -595,28 +650,133 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                             </span>
                             <div className="font-mono text-xs">
                               <span className="font-bold text-emerald-400">
-                                {roundPct(pick.model_probability)}%
+                                {formatModelPct(pick.model_probability)}
                               </span>
                               <span className="text-gray-500 ml-1">
-                                ({t("picks.fair")} {pick.fair_odds.toFixed(2)})
+                                ({t("picks.fair")} {fmtOdds(pick.fair_odds)})
                               </span>
                             </div>
                           </div>
                         </div>
 
-                        {/* Top Predicted Exact Scores */}
+                        {/* Over/Under Visual Distribution Split */}
+                        {(() => {
+                          const isTotalsPick =
+                            isGoals ||
+                            pick.selection === "OVER_2_5" ||
+                            pick.selection?.includes("OVER") ||
+                            pick.selection?.includes("UNDER") ||
+                            pick.market_type?.toLowerCase().includes("totals") ||
+                            pick.market_type?.includes("大小");
+
+                          if (!isTotalsPick) return null;
+
+                          const isOverPick = pick.selection?.includes("OVER") ?? true;
+                          const modelProb =
+                            typeof pick.model_probability === "number"
+                              ? pick.model_probability
+                              : Number(pick.model_probability) || 0.5;
+                          const underProbVal =
+                            typeof pick.under_probability === "number"
+                              ? pick.under_probability
+                              : isOverPick
+                              ? Math.max(0, 1 - modelProb)
+                              : modelProb;
+                          const overProbVal = isOverPick ? modelProb : Math.max(0, 1 - underProbVal);
+
+                          const overPct = (overProbVal * 100).toFixed(1);
+                          const underPct = (underProbVal * 100).toFixed(1);
+
+                          return (
+                            <div className="p-3.5 rounded-xl bg-gray-900/60 border border-gray-800/80 space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <div className="flex items-center space-x-1.5 font-mono">
+                                  <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+                                  <span className="text-gray-300 font-medium">{t("picks.under25")}</span>
+                                  <span className="text-blue-300 font-bold">{underPct}%</span>
+                                </div>
+                                <div className="flex items-center space-x-1.5 font-mono">
+                                  <span className="text-emerald-400 font-bold">{t("picks.over25")}</span>
+                                  <span className="text-emerald-300 font-extrabold">{overPct}%</span>
+                                  <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
+                                </div>
+                              </div>
+
+                              {/* Dual Progress Bar */}
+                              <div className="h-2.5 w-full bg-gray-950 rounded-full overflow-hidden flex border border-gray-800/80">
+                                <div
+                                  className="h-full bg-gradient-to-r from-blue-600 to-blue-500 transition-all duration-500"
+                                  style={{ width: `${underPct}%` }}
+                                  title={`${t("picks.under25")}: ${underPct}%`}
+                                />
+                                <div
+                                  className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]"
+                                  style={{ width: `${overPct}%` }}
+                                  title={`${t("picks.over25")}: ${overPct}%`}
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-between text-[10px] text-gray-500 font-mono pt-0.5">
+                                <span>{t("picks.under25Detail")}</span>
+                                <span className="text-emerald-400/90 font-medium">{t("picks.over25Detail")}</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Top Predicted Exact Scores (Statistical Modes) */}
                         {pick.top_scores && pick.top_scores.length > 0 && (
-                          <div className="flex items-center justify-between text-xs py-2 px-3 rounded-lg bg-gray-900/40 border border-gray-800/60 font-mono">
-                            <span className="text-gray-400 text-[11px]">{t("picks.topScores")}</span>
-                            <div className="flex items-center space-x-2">
-                              {pick.top_scores.map((s: any, idx: number) => (
-                                <span
-                                  key={idx}
-                                  className="px-2 py-0.5 rounded bg-gray-800/80 text-gray-200 text-[11px]"
-                                >
-                                  <strong>{s.score}</strong> ({s.prob_pct}%)
-                                </span>
-                              ))}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs py-2 px-3 rounded-lg bg-gray-900/40 border border-gray-800/60 font-mono">
+                            <div
+                              className="flex items-center space-x-1.5 text-gray-400 text-[11px]"
+                              title={t("picks.topScoresHint")}
+                            >
+                              <Info className="w-3 h-3 text-gray-500" />
+                              <span>{t("picks.topScores")}</span>
+                            </div>
+                            <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+                              {pick.top_scores.map((s: any, idx: number) => {
+                                let goals: number | null = typeof s.goals === "number" ? s.goals : null;
+                                if (goals === null && typeof s.score === "string" && s.score.includes("-")) {
+                                  const parts = s.score.split("-");
+                                  if (parts.length === 2 && !isNaN(Number(parts[0])) && !isNaN(Number(parts[1]))) {
+                                    goals = Number(parts[0]) + Number(parts[1]);
+                                  }
+                                }
+                                const isTotalsPick =
+                                  isGoals ||
+                                  pick.selection === "OVER_2_5" ||
+                                  pick.selection?.includes("OVER");
+                                const isOverLine = isTotalsPick && goals !== null && goals >= 3;
+
+                                return (
+                                  <span
+                                    key={s.score ?? `score-${idx}`}
+                                    className={`px-2 py-0.5 rounded text-[11px] inline-flex items-center space-x-1 border ${
+                                      isOverLine
+                                        ? "bg-emerald-950/60 border-emerald-600/50 text-emerald-300 font-semibold"
+                                        : "bg-gray-800/80 border-gray-700/60 text-gray-300"
+                                    }`}
+                                  >
+                                    <strong>{s.score}</strong>
+                                    <span className={isOverLine ? "text-emerald-400/80" : "text-gray-400"}>
+                                      ({s.prob_pct}%)
+                                    </span>
+                                    {goals !== null && (
+                                      <span
+                                        className={`text-[9px] px-1 py-0.2 rounded font-sans ${
+                                          isOverLine
+                                            ? "bg-emerald-500/20 text-emerald-300"
+                                            : "bg-gray-700/60 text-gray-400"
+                                        }`}
+                                      >
+                                        {goals}
+                                        {t("picks.goalsSuffix")}
+                                      </span>
+                                    )}
+                                  </span>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -635,9 +795,9 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                         {/* Footer: View Full 6x6 Matrix */}
                         <div className="pt-2 flex items-center justify-between">
                           <div className="flex items-center space-x-2">
-                            {pick.key_stats?.map((stat: string, idx: number) => (
+                            {pick.key_stats?.map((stat: string) => (
                               <span
-                                key={idx}
+                                key={stat}
                                 className="text-[10px] px-2 py-0.5 rounded bg-gray-900 text-gray-400 border border-gray-800 font-mono"
                               >
                                 {stat}
@@ -646,7 +806,14 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
                           </div>
 
                           <button
-                            onClick={() => onSelectMatch(pick.match_id)}
+                            onClick={() =>
+                              onSelectMatch(pick.match_id, {
+                                home: pick.home_team,
+                                away: pick.away_team,
+                                leagueId: pick.league_id,
+                                matchDate: pick.match_date,
+                              })
+                            }
                             className="inline-flex items-center space-x-1 text-xs font-bold text-blue-400 hover:text-blue-300 transition"
                           >
                             <span>{t("picks.matrixBtn")}</span>
@@ -666,6 +833,3 @@ export const DailyPicksView: React.FC<DailyPicksViewProps> = ({
   );
 };
 
-function roundPct(val: number): string {
-  return (val * 100).toFixed(1);
-}

@@ -2,7 +2,9 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.database import AsyncSessionLocal
+from app.etl.odds_api import season_label
 from app.models import League, Team, TeamAlias, Match
 
 LEAGUES = [
@@ -24,6 +26,7 @@ LEAGUES = [
     ("CHAMPIONSHIP", "Championship", "England", True),
     ("EREDIVISIE", "Eredivisie", "Netherlands", True),
     ("PRIMEIRA_LIGA", "Primeira Liga", "Portugal", True),
+    ("BEL", "Jupiler Pro League", "Belgium", True),
     # Americas & Global Leagues
     ("MLS", "Major League Soccer", "USA", True),
     ("BRASILEIRAO", "Série A (Brasileirão)", "Brazil", True),
@@ -145,6 +148,15 @@ TEAMS = [
     ("porto", "FC Porto", "Portugal"),
     ("braga", "SC Braga", "Portugal"),
 
+    # Belgian Pro League (比甲 - Belgium)
+    ("club-brugge", "Club Brugge", "Belgium"),
+    ("anderlecht", "Anderlecht", "Belgium"),
+    ("genk", "KRC Genk", "Belgium"),
+    ("gent", "KAA Gent", "Belgium"),
+    ("union-sg", "Union Saint-Gilloise", "Belgium"),
+    ("antwerp", "Royal Antwerp", "Belgium"),
+    ("standard-liege", "Standard Liège", "Belgium"),
+
     # MLS (USA)
     ("inter-miami", "Inter Miami", "USA"),
     ("la-galaxy", "LA Galaxy", "USA"),
@@ -217,6 +229,63 @@ CONFIRMED_ALIASES = [
     ("the_odds_api", None, "LAFC", "USA", "lafc"),
     ("the_odds_api", None, "Al Nassr", "Saudi Arabia", "al-nassr"),
     ("the_odds_api", None, "Al Hilal", "Saudi Arabia", "al-hilal"),
+    # Eredivisie & Primeira Liga (football_data aliases)
+    ("football_data", None, "PSV Eindhoven", "Netherlands", "psv"),
+    ("football_data", None, "Ajax", "Netherlands", "ajax"),
+    ("football_data", None, "Feyenoord", "Netherlands", "feyenoord"),
+    ("football_data", None, "AZ Alkmaar", "Netherlands", "az-alkmaar"),
+    ("football_data", None, "Twente", "Netherlands", "twente"),
+    ("football_data", None, "FC Twente", "Netherlands", "twente"),
+    ("football_data", None, "Sporting CP", "Portugal", "sporting"),
+    ("football_data", None, "Sporting Lisbon", "Portugal", "sporting"),
+    ("football_data", None, "Sp Lisbon", "Portugal", "sporting"),
+    ("football_data", None, "Benfica", "Portugal", "benfica"),
+    ("football_data", None, "Porto", "Portugal", "porto"),
+    ("football_data", None, "FC Porto", "Portugal", "porto"),
+    ("football_data", None, "Braga", "Portugal", "braga"),
+    ("football_data", None, "Sp Braga", "Portugal", "braga"),
+    # Belgian Pro League (football_data aliases)
+    ("football_data", None, "Club Brugge", "Belgium", "club-brugge"),
+    ("football_data", None, "Anderlecht", "Belgium", "anderlecht"),
+    ("football_data", None, "Genk", "Belgium", "genk"),
+    ("football_data", None, "Gent", "Belgium", "gent"),
+    ("football_data", None, "St Gilloise", "Belgium", "union-sg"),
+    ("football_data", None, "Union SG", "Belgium", "union-sg"),
+    ("football_data", None, "Antwerp", "Belgium", "antwerp"),
+    ("football_data", None, "Standard", "Belgium", "standard-liege"),
+    # Austria (football_data aliases)
+    ("football_data", None, "Salzburg", "Austria", "salzburg"),
+    ("football_data", None, "Red Bull Salzburg", "Austria", "salzburg"),
+    ("football_data", None, "Sturm Graz", "Austria", "sturm-graz"),
+    ("football_data", None, "SK Rapid", "Austria", "rapid-wien"),
+    ("football_data", None, "Rapid Vienna", "Austria", "rapid-wien"),
+    ("football_data", None, "Austria Vienna", "Austria", "austria-wien"),
+    ("football_data", None, "LASK", "Austria", "lask"),
+    ("football_data", None, "Wolfsberger AC", "Austria", "wolfsberger"),
+    # Denmark (football_data aliases)
+    ("football_data", None, "FC Copenhagen", "Denmark", "copenhagen"),
+    ("football_data", None, "FC Kobenhavn", "Denmark", "copenhagen"),
+    ("football_data", None, "Midtjylland", "Denmark", "midtjylland"),
+    ("football_data", None, "Brondby", "Denmark", "brondby"),
+    ("football_data", None, "Nordsjaelland", "Denmark", "nordsjaelland"),
+    ("football_data", None, "Aarhus", "Denmark", "aarhus"),
+    ("football_data", None, "Silkeborg", "Denmark", "silkeborg"),
+    # Norway (football_data aliases)
+    ("football_data", None, "Bodo/Glimt", "Norway", "bodo-glimt"),
+    ("football_data", None, "Bodo Glimt", "Norway", "bodo-glimt"),
+    ("football_data", None, "Brann", "Norway", "brann"),
+    ("football_data", None, "Rosenborg", "Norway", "rosenborg"),
+    ("football_data", None, "Molde", "Norway", "molde"),
+    ("football_data", None, "Viking", "Norway", "viking"),
+    ("football_data", None, "Tromso", "Norway", "tromso"),
+    # Sweden (football_data aliases)
+    ("football_data", None, "Malmo FF", "Sweden", "malmo"),
+    ("football_data", None, "Malmo", "Sweden", "malmo"),
+    ("football_data", None, "Djurgarden", "Sweden", "djurgarden"),
+    ("football_data", None, "Hammarby", "Sweden", "hammarby"),
+    ("football_data", None, "AIK", "Sweden", "aik"),
+    ("football_data", None, "Elfsborg", "Sweden", "elfsborg"),
+    ("football_data", None, "Hacken", "Sweden", "hacken"),
 ]
 
 # Historical completed matches across all 17 leagues
@@ -393,76 +462,74 @@ HISTORICAL_MATCHES = [
 
 async def seed_database():
     async with AsyncSessionLocal() as session:
-        # 1. Leagues
-        for l_id, name, country, active in LEAGUES:
-            stmt = select(League).where(League.id == l_id)
-            existing = (await session.execute(stmt)).scalar_one_or_none()
-            if not existing:
-                session.add(League(id=l_id, name=name, country=country, active=active))
-            else:
-                existing.name = name
-                existing.country = country
-                existing.active = active
+        # 1. Leagues — one batched upsert instead of a SELECT+write per row.
+        if LEAGUES:
+            league_stmt = pg_insert(League).values([
+                {"id": l_id, "name": name, "country": country, "active": active}
+                for l_id, name, country, active in LEAGUES
+            ])
+            league_stmt = league_stmt.on_conflict_do_update(
+                index_elements=[League.id],
+                set_={
+                    "name": league_stmt.excluded.name,
+                    "country": league_stmt.excluded.country,
+                    "active": league_stmt.excluded.active,
+                },
+            )
+            await session.execute(league_stmt)
 
-        await session.flush()
+        # 2. Teams — batched upsert.
+        if TEAMS:
+            team_stmt = pg_insert(Team).values([
+                {"id": team_id, "canonical_name": name, "country": country}
+                for team_id, name, country in TEAMS
+            ])
+            team_stmt = team_stmt.on_conflict_do_update(
+                index_elements=[Team.id],
+                set_={
+                    "canonical_name": team_stmt.excluded.canonical_name,
+                    "country": team_stmt.excluded.country,
+                },
+            )
+            await session.execute(team_stmt)
 
-        # 2. Teams
-        for team_id, name, country in TEAMS:
-            stmt = select(Team).where(Team.id == team_id)
-            existing = (await session.execute(stmt)).scalar_one_or_none()
-            if not existing:
-                session.add(Team(id=team_id, canonical_name=name, country=country))
-            else:
-                existing.canonical_name = name
-                existing.country = country
+        # 3. Aliases — insert-if-absent. The targetless DO NOTHING covers both
+        #    partial unique indexes (source+external_id, and source+country+name
+        #    for confirmed rows), so no per-row SELECT is needed.
+        if CONFIRMED_ALIASES:
+            alias_stmt = pg_insert(TeamAlias).values([
+                {
+                    "source_name": source_name,
+                    "external_id": ext_id,
+                    "external_name": ext_name,
+                    "country": country,
+                    "team_id": team_id,
+                }
+                for source_name, ext_id, ext_name, country, team_id in CONFIRMED_ALIASES
+            ]).on_conflict_do_nothing()
+            await session.execute(alias_stmt)
 
-        await session.flush()
-
-        # 3. Aliases
-        for source_name, ext_id, ext_name, country, team_id in CONFIRMED_ALIASES:
-            if ext_id:
-                stmt = select(TeamAlias).where(
-                    TeamAlias.source_name == source_name,
-                    TeamAlias.external_id == ext_id,
-                )
-            else:
-                stmt = select(TeamAlias).where(
-                    TeamAlias.source_name == source_name,
-                    TeamAlias.country == country,
-                    TeamAlias.external_name == ext_name,
-                    TeamAlias.external_id.is_(None),
-                )
-            existing = (await session.execute(stmt)).scalar_one_or_none()
-            if not existing:
-                session.add(TeamAlias(
-                    source_name=source_name,
-                    external_id=ext_id,
-                    external_name=ext_name,
-                    country=country,
-                    team_id=team_id,
-                ))
-
-        await session.flush()
-
-        # 4. Historical Finished Matches
-        for m_id, l_id, m_date_str, h_team, a_team, h_score, a_score, res_avail_str in HISTORICAL_MATCHES:
-            stmt = select(Match).where(Match.id == m_id)
-            existing = (await session.execute(stmt)).scalar_one_or_none()
-            if not existing:
+        # 4. Historical finished matches — insert-if-absent in one statement.
+        if HISTORICAL_MATCHES:
+            historical_rows = []
+            for m_id, l_id, m_date_str, h_team, a_team, h_score, a_score, res_avail_str in HISTORICAL_MATCHES:
                 m_date = datetime.fromisoformat(m_date_str.replace("Z", "+00:00"))
                 res_avail = datetime.fromisoformat(res_avail_str.replace("Z", "+00:00"))
-                session.add(Match(
-                    id=m_id,
-                    league_id=l_id,
-                    season="2024-2025",
-                    match_date=m_date,
-                    home_team_id=h_team,
-                    away_team_id=a_team,
-                    status="FINISHED",
-                    home_score=h_score,
-                    away_score=a_score,
-                    result_available_at=res_avail,
-                ))
+                historical_rows.append({
+                    "id": m_id,
+                    "league_id": l_id,
+                    "season": season_label(m_date),
+                    "match_date": m_date,
+                    "home_team_id": h_team,
+                    "away_team_id": a_team,
+                    "status": "FINISHED",
+                    "home_score": h_score,
+                    "away_score": a_score,
+                    "result_available_at": res_avail,
+                })
+            await session.execute(
+                pg_insert(Match).values(historical_rows).on_conflict_do_nothing(index_elements=[Match.id])
+            )
 
         # 5. Scheduled Matches across all 17 leagues
         now = datetime.now(timezone.utc)
@@ -548,22 +615,59 @@ async def seed_database():
             ("SPL_DEMO_002", "SAUDI_PRO_LEAGUE", now + timedelta(days=2, hours=4), "al-nassr", "al-ahli"),
         ]
 
-        for m_id, l_id, m_date, h_team, a_team in scheduled_fixtures:
-            stmt = select(Match).where(Match.id == m_id)
-            existing = (await session.execute(stmt)).scalar_one_or_none()
-            if not existing:
-                session.add(Match(
-                    id=m_id,
-                    league_id=l_id,
-                    season="2024-2025",
-                    match_date=m_date,
-                    home_team_id=h_team,
-                    away_team_id=a_team,
-                    status="SCHEDULED",
-                ))
+        # 5. Scheduled Matches across all 17 leagues — one batched upsert that
+        #    only rewrites rows still in the SCHEDULED state.
+        if scheduled_fixtures:
+            scheduled_rows = [
+                {
+                    "id": m_id,
+                    "league_id": l_id,
+                    "season": season_label(m_date),
+                    "match_date": m_date,
+                    "home_team_id": h_team,
+                    "away_team_id": a_team,
+                    "status": "SCHEDULED",
+                    "updated_at": now,
+                }
+                for m_id, l_id, m_date, h_team, a_team in scheduled_fixtures
+            ]
+            sched_stmt = pg_insert(Match).values(scheduled_rows)
+            sched_stmt = sched_stmt.on_conflict_do_update(
+                index_elements=[Match.id],
+                set_={
+                    "match_date": sched_stmt.excluded.match_date,
+                    "season": sched_stmt.excluded.season,
+                    "home_team_id": sched_stmt.excluded.home_team_id,
+                    "away_team_id": sched_stmt.excluded.away_team_id,
+                    "updated_at": sched_stmt.excluded.updated_at,
+                },
+                where=(Match.status == "SCHEDULED"),
+            )
+            await session.execute(sched_stmt)
 
         await session.commit()
         print("Database seeded with all 17 leagues including Nordic & Central European leagues successfully.")
+
+
+async def refresh_scheduled_demo_matches() -> None:
+    """Keep fixed demo ids in the future and on the season that contains their kickoff."""
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(Match).where(
+                    Match.status == "SCHEDULED",
+                    Match.id.like("%\\_DEMO\\_%", escape="\\"),
+                )
+            )
+        ).scalars().all()
+        for match in rows:
+            if match.match_date <= now:
+                slipped_days = (now - match.match_date).days + 1
+                match.match_date = match.match_date + timedelta(days=slipped_days)
+            match.season = season_label(match.match_date)
+            match.updated_at = now
+        await session.commit()
 
 
 if __name__ == "__main__":

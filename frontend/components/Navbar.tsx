@@ -1,14 +1,16 @@
 "use client";
 
 import React from "react";
-import { Shield, Zap, User as UserIcon, LogOut, ChevronRight, Globe } from "lucide-react";
+import Link from "next/link";
+import { Shield, Zap, User as UserIcon, LogOut, ChevronRight, Globe, Settings } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
 interface NavbarProps {
-  user: { email: string; effective_plan: string; plan_expires_at?: string } | null;
+  user: { email: string; effective_plan: string; plan_expires_at?: string; is_admin?: boolean } | null;
   onOpenAuth: () => void;
   onOpenPricing: () => void;
   onLogout: () => void;
+  onLogoClick?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -16,20 +18,28 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuth,
   onOpenPricing,
   onLogout,
+  onLogoClick,
 }) => {
   const { lang, toggleLang, t } = useI18n();
   const isAnalyst = user?.effective_plan === "ANALYST";
 
   return (
-    <header className="border-b border-gray-800 bg-[#0d121f]/90 backdrop-blur sticky top-0 z-40">
+    <header aria-label="Site" className="border-b border-gray-800 bg-[#0d121f]/90 backdrop-blur sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-lg text-white shadow-lg shadow-blue-500/20">
+        <Link
+          href="/"
+          onClick={onLogoClick}
+          className="flex items-center space-x-3 group cursor-pointer hover:opacity-95 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-lg p-0.5"
+          title={lang === "zh" ? "返回首页" : "Return to Home"}
+        >
+          <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-lg text-white shadow-lg shadow-blue-500/20 group-hover:bg-blue-500 transition">
             λ
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <span className="font-extrabold text-xl tracking-tight text-white">{t("nav.brand")}</span>
+              <span className="font-extrabold text-xl tracking-tight text-white group-hover:text-blue-300 transition">
+                {t("nav.brand")}
+              </span>
               <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-mono font-medium">
                 {t("nav.version")}
               </span>
@@ -38,7 +48,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               {t("nav.subtitle")}
             </p>
           </div>
-        </div>
+        </Link>
 
         <div className="flex items-center space-x-3">
           {/* Language Switcher Toggle */}
@@ -46,6 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={toggleLang}
             className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-700 text-xs text-gray-300 hover:text-white transition font-mono"
             title={lang === "zh" ? "Switch to English" : "切换为简体中文"}
+            aria-label={lang === "zh" ? "Switch to English" : "切换为简体中文"}
           >
             <Globe className="w-3.5 h-3.5 text-blue-400" />
             <span className="font-bold">{lang === "zh" ? "EN" : "中"}</span>
@@ -68,6 +79,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </div>
 
+              {user.is_admin && (
+                <Link
+                  href="/admin"
+                  className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition"
+                  title={t("nav.admin")}
+                  aria-label={t("nav.admin").replace(/^⚙️\s*/, "")}
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  <span>{t("nav.admin")}</span>
+                </Link>
+              )}
+
               {!isAnalyst && (
                 <button
                   onClick={onOpenPricing}
@@ -82,6 +105,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={onLogout}
                 className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition"
                 title={t("nav.logout")}
+                aria-label={t("nav.logout")}
               >
                 <LogOut className="w-4 h-4" />
               </button>

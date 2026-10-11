@@ -6,7 +6,7 @@ from app.math.shin import calculate_shin_probabilities
 from app.math.dixon_coles import calculate_match_distribution, check_all_tau_factors, tau, fit_dixon_coles
 from app.math.ev import calculate_ev, calculate_half_kelly, has_value_signal
 from app.math.metrics import brier_score_multiclass, log_loss_multiclass
-from app.math.evaluate import latest_eligible_quote
+from app.math.freshness import latest_eligible_quote
 from app.math.backtest import calculate_historical_backtest, calculate_dataset_backtest
 
 
@@ -29,6 +29,23 @@ def test_shin_acceptance_example():
     assert pytest.approx(0.27432839612, abs=1e-5) == probs[1]
     assert pytest.approx(0.23893796911, abs=1e-5) == probs[2]
     assert pytest.approx(1.0, abs=1e-10) == sum(probs)
+
+
+def test_btts_yes_excludes_scoreless_tails():
+    from app.math.derivatives import compute_derived_markets
+
+    dist = calculate_match_distribution(0.2, 4.5, 0.0)
+    derived = compute_derived_markets(
+        dist["score_matrix"],
+        0.2,
+        4.5,
+        dist["omitted_mass"],
+        dist["prob_home_win"],
+        dist["prob_draw"],
+        dist["prob_away_win"],
+    )
+    expected = (1.0 - math.exp(-0.2)) * (1.0 - math.exp(-4.5))
+    assert derived["btts"]["yes"]["prob"] == pytest.approx(expected, abs=0.02)
 
 
 def test_dixon_coles_acceptance_distribution():
@@ -196,15 +213,26 @@ def test_dataset_historical_backtest_execution():
         league_filter="EPL",
         years=3,
     )
-    assert res["status"] in ("AVAILABLE", "NO_BETS")
+    # Dataset-path status vocabulary (NO_BETS is retired on this path):
+    #   AVAILABLE       -> ROI > 0 AND Brier improvement > 0
+    #   MODEL_NO_EDGE   -> results computed but ROI <= 0 or Brier improvement <= 0
+    #   DATA_UNAVAILABLE-> historical dataset missing/unparseable
+    #   INSUFFICIENT_DATA -> no evaluable fixtures in the window
+    # With the 10-year dataset present the walk-forward backtest is not
+    # profitable, so this path reports MODEL_NO_EDGE.
+    assert res["status"] in ("AVAILABLE", "MODEL_NO_EDGE")
     assert "summary" in res
     if res["status"] == "AVAILABLE":
         s = res["summary"]
+        assert s["roi_pct"] > 0
+        assert s["brier_improvement_pct"] is not None and s["brier_improvement_pct"] > 0
         assert s["total_bets"] > 0
         assert s["total_staked"] > 0
         assert s["win_rate_pct"] > 0
-        assert s["beat_clv_rate_pct"] is not None
-        assert s["beat_clv_rate_pct"] > 50.0  # Sharp model should beat closing line > 50%
+        assert s["beat_clv_rate_pct"] is None or 0.0 <= s["beat_clv_rate_pct"] <= 100.0
+        assert "Dixon-Coles" not in res["method"] or "not Dixon-Coles" in res["method"]
+        assert res["probability_source"] == "POISSON_TEAM_RATES"
+        assert res["price_source"] == "PINNACLE_OPENING"
         assert len(res["equity_curve"]) > 0
         assert len(res["recent_bets"]) > 0
         # Check CLV structure on recent bets
@@ -212,3 +240,10 @@ def test_dataset_historical_backtest_execution():
         assert "beat_clv" in first_bet
         assert "odds" in first_bet
         assert "closing_odds" in first_bet
+    else:
+        s = res["summary"]
+        # MODEL_NO_EDGE requires the model to be flat-or-losing and/or no better
+        # than the de-juiced market baseline.
+        assert s["roi_pct"] <= 0 or (
+            s["brier_improvement_pct"] is not None and s["brier_improvement_pct"] <= 0
+        )

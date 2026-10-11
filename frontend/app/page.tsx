@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { FixtureCard } from "@/components/FixtureCard";
@@ -11,7 +11,7 @@ import { AlphaScannerView } from "@/components/AlphaScannerView";
 import { BacktestView } from "@/components/BacktestView";
 import { BankrollSimulatorView } from "@/components/BankrollSimulatorView";
 import { DailyPicksView } from "@/components/DailyPicksView";
-import { apiRequest, setAuthToken } from "@/lib/api";
+import { apiRequest, AUTH_CLEARED_EVENT, getAuthToken, setAuthToken } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { Shield, Sparkles, Filter, RefreshCw, Calendar, AlertCircle, Trophy, Zap, TrendingUp, Calculator, BarChart3 } from "lucide-react";
 
@@ -57,6 +57,7 @@ const LEAGUE_CATEGORIES: LeagueCategory[] = [
       { id: "CHAMPIONSHIP", name: "英冠 (Championship)", country: "England", badge: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
       { id: "EREDIVISIE", name: "荷甲 (Eredivisie)", country: "Netherlands", badge: "🇳🇱" },
       { id: "PRIMEIRA_LIGA", name: "葡超 (Primeira Liga)", country: "Portugal", badge: "🇵🇹" },
+      { id: "BEL", name: "比甲 (Belgian Pro League)", country: "Belgium", badge: "🇧🇪" },
     ],
   },
   {
@@ -94,8 +95,15 @@ for (const cat of LEAGUE_CATEGORIES) {
   }
 }
 
+type MatchHint = {
+  home?: string;
+  away?: string;
+  leagueId?: string;
+  matchDate?: string;
+};
+
 function HomeContent() {
-  const { lang, t } = useI18n();
+  const { t } = useI18n();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any | null>(null);
   const isAnalyst = user?.effective_plan === "ANALYST";
@@ -118,6 +126,41 @@ function HomeContent() {
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
   const [isPricingOpen, setIsPricingOpen] = useState<boolean>(false);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [selectedFixtureHint, setSelectedFixtureHint] = useState<any | null>(null);
+  const fixturesAbortRef = useRef<AbortController | null>(null);
+  const fixturesSeq = useRef(0);
+
+  const openMatch = (id: string, hint?: MatchHint) => {
+    setSelectedMatchId(id);
+    if (hint?.home || hint?.away) {
+      setSelectedFixtureHint({
+        match_id: id,
+        home_team: { name: hint.home || "—" },
+        away_team: { name: hint.away || "—" },
+        league_id: hint.leagueId,
+        match_date: hint.matchDate,
+      });
+    } else {
+      setSelectedFixtureHint(null);
+    }
+  };
+
+  useEffect(() => {
+    const clearSession = () => {
+      setUser(null);
+      setValueOnly(false);
+      setLiveTickerSignals([]);
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "matchlambda_auth_token" && !event.newValue) clearSession();
+    };
+    window.addEventListener(AUTH_CLEARED_EVENT, clearSession);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(AUTH_CLEARED_EVENT, clearSession);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   // Show the same entitlement-gated feed used by the scanner view.
   useEffect(() => {
@@ -125,49 +168,83 @@ function HomeContent() {
       setLiveTickerSignals([]);
       return;
     }
-    apiRequest<any>("/alpha/scanner?min_ev=0.05&limit=4")
-      .then((res) => setLiveTickerSignals(res.signals || []))
-      .catch(() => setLiveTickerSignals([]));
+    const controller = new AbortController();
+    let active = true;
+    apiRequest<any>("/alpha/scanner?min_ev=0.05&limit=4", { signal: controller.signal })
+      .then((res) => {
+        if (!active || !getAuthToken()) return;
+        setLiveTickerSignals(res?.signals || []);
+      })
+      .catch((err: any) => {
+        if (err?.code === "ABORTED" || controller.signal.aborted) return;
+        if (active && !controller.signal.aborted) setLiveTickerSignals([]);
+      });
+    return () => {
+      active = false;
+      controller.abort(new Error("Component unmounted"));
+    };
   }, [isAnalyst]);
 
-  // Auto open modal on return from NOWPayments hosted checkout
+  // Open pricing only for a successful or still-pending checkout return.
   useEffect(() => {
     const statusParam = searchParams.get("status");
     const orderIdParam = searchParams.get("order_id");
-    if (statusParam && orderIdParam) {
+    if (!statusParam || !orderIdParam) return;
+    const status = statusParam.toLowerCase();
+    if (status === "success" || status === "pending") {
       setIsPricingOpen(true);
     }
   }, [searchParams]);
 
   const fetchUser = useCallback(async () => {
+    if (!getAuthToken()) {
+      setUser(null);
+      return;
+    }
     try {
       const data = await apiRequest<any>("/me");
+      if (!getAuthToken()) {
+        setUser(null);
+        return;
+      }
       setUser(data);
     } catch {
-      setUser(null);
+      if (!getAuthToken()) setUser(null);
     }
   }, []);
 
   const fetchFixtures = useCallback(async () => {
+    fixturesAbortRef.current?.abort(new Error("Superseded"));
+    const controller = new AbortController();
+    fixturesAbortRef.current = controller;
+    const seq = ++fixturesSeq.current;
     setLoading(true);
     setError(null);
     try {
-      let query = `/matches/fixtures?days_ahead=${daysAhead}&limit=50&offset=0`;
+      const params = new URLSearchParams({
+        days_ahead: String(daysAhead),
+        limit: "50",
+        offset: "0",
+      });
       if (selectedLeague && selectedLeague !== "ALL") {
-        query += `&league_id=${selectedLeague}`;
+        params.set("league_id", selectedLeague);
       }
-      if (valueOnly && user?.effective_plan === "ANALYST") {
-        query += "&has_value=true";
+      if (valueOnly && isAnalyst) {
+        params.set("has_value", "true");
       }
-      const data = await apiRequest<any>(query);
-      setFixtures(data.fixtures || []);
-      setTotal(data.total || 0);
+      const data = await apiRequest<any>(`/matches/fixtures?${params.toString()}`, {
+        signal: controller.signal,
+      });
+      if (seq !== fixturesSeq.current) return;
+      setFixtures(data?.fixtures || []);
+      setTotal(data?.total || 0);
     } catch (err: any) {
+      if (seq !== fixturesSeq.current || controller.signal.aborted || err?.code === "ABORTED") return;
       setError(err?.message || "Failed to load fixtures.");
     } finally {
-      setLoading(false);
+      if (seq === fixturesSeq.current) setLoading(false);
     }
-  }, [selectedLeague, daysAhead, valueOnly, user]);
+  }, [selectedLeague, daysAhead, valueOnly, isAnalyst]);
 
   useEffect(() => {
     fetchUser();
@@ -175,6 +252,10 @@ function HomeContent() {
 
   useEffect(() => {
     fetchFixtures();
+    return () => {
+      fixturesSeq.current += 1;
+      fixturesAbortRef.current?.abort(new Error("Component unmounted"));
+    };
   }, [fetchFixtures]);
 
   const handleLogout = () => {
@@ -206,9 +287,16 @@ function HomeContent() {
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenPricing={() => setIsPricingOpen(true)}
         onLogout={handleLogout}
+        onLogoClick={() => {
+          setTerminalTab("PICKS");
+          setSelectedLeague("TOP5");
+          setSelectedMatchId(null);
+          setSelectedFixtureHint(null);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main id="main-content" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Latest eligible +EV signals */}
         {liveTickerSignals.length > 0 && (
           <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl px-4 py-2.5 flex items-center justify-between overflow-hidden text-xs font-mono">
@@ -222,7 +310,12 @@ function HomeContent() {
                   key={sig.signal_id}
                   onClick={() => {
                     setTerminalTab("SCANNER");
-                    setSelectedMatchId(sig.match_id);
+                    openMatch(sig.match_id, {
+                      home: sig.home_team,
+                      away: sig.away_team,
+                      leagueId: sig.league_id,
+                      matchDate: sig.match_date,
+                    });
                   }}
                   className="flex items-center space-x-2 hover:text-emerald-300 transition cursor-pointer"
                 >
@@ -241,8 +334,11 @@ function HomeContent() {
 
         {/* Terminal Main Mode Switcher */}
         <div className="flex items-center justify-between border-b border-gray-800 pb-3">
-          <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none">
+          <div role="tablist" aria-label="Sections" className="flex items-center space-x-2 overflow-x-auto scrollbar-none">
             <button
+              type="button"
+              role="tab"
+              aria-selected={terminalTab === "PICKS"}
               onClick={() => setTerminalTab("PICKS")}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "PICKS"
@@ -255,6 +351,9 @@ function HomeContent() {
             </button>
 
             <button
+              type="button"
+              role="tab"
+              aria-selected={terminalTab === "SCANNER"}
               onClick={() => setTerminalTab("SCANNER")}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "SCANNER"
@@ -267,6 +366,9 @@ function HomeContent() {
             </button>
 
             <button
+              type="button"
+              role="tab"
+              aria-selected={terminalTab === "FIXTURES"}
               onClick={() => setTerminalTab("FIXTURES")}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "FIXTURES"
@@ -279,6 +381,9 @@ function HomeContent() {
             </button>
 
             <button
+              type="button"
+              role="tab"
+              aria-selected={terminalTab === "BACKTEST"}
               onClick={() => setTerminalTab("BACKTEST")}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "BACKTEST"
@@ -291,6 +396,9 @@ function HomeContent() {
             </button>
 
             <button
+              type="button"
+              role="tab"
+              aria-selected={terminalTab === "SIMULATOR"}
               onClick={() => setTerminalTab("SIMULATOR")}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                 terminalTab === "SIMULATOR"
@@ -309,7 +417,7 @@ function HomeContent() {
           <DailyPicksView
             isAnalyst={isAnalyst}
             onOpenPricing={() => setIsPricingOpen(true)}
-            onSelectMatch={(id) => setSelectedMatchId(id)}
+            onSelectMatch={(id, hint) => openMatch(id, hint)}
           />
         )}
 
@@ -317,7 +425,7 @@ function HomeContent() {
           <AlphaScannerView
             isAnalyst={isAnalyst}
             onOpenPricing={() => setIsPricingOpen(true)}
-            onSelectMatch={(id) => setSelectedMatchId(id)}
+            onSelectMatch={(id, hint) => openMatch(id, hint)}
           />
         )}
 
@@ -574,7 +682,7 @@ function HomeContent() {
                   key={fixture.match_id}
                   fixture={fixture}
                   isAnalyst={isAnalyst}
-                  onSelect={(id) => setSelectedMatchId(id)}
+                  onSelect={(id) => openMatch(id)}
                   onUpgrade={() => setIsPricingOpen(true)}
                 />
               ))}
@@ -613,8 +721,14 @@ function HomeContent() {
 
       <AnalysisModal
         matchId={selectedMatchId}
-        fixture={fixtures.find((f) => f.match_id === selectedMatchId)}
-        onClose={() => setSelectedMatchId(null)}
+        fixture={
+          fixtures.find((f) => f.match_id === selectedMatchId) ||
+          (selectedFixtureHint?.match_id === selectedMatchId ? selectedFixtureHint : undefined)
+        }
+        onClose={() => {
+          setSelectedMatchId(null);
+          setSelectedFixtureHint(null);
+        }}
       />
     </div>
   );
@@ -622,7 +736,7 @@ function HomeContent() {
 
 export default function Home() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#080c14] flex items-center justify-center text-gray-500 font-mono text-xs">Loading MatchLambda...</div>}>
+    <Suspense fallback={<main id="main-content" className="min-h-screen bg-[#080c14] flex items-center justify-center text-gray-500 font-mono text-xs">Loading MatchLambda...</main>}>
       <HomeContent />
     </Suspense>
   );

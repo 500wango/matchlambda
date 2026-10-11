@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 
 export type Language = "zh" | "en";
 
@@ -13,6 +13,11 @@ export interface I18nContextType {
 
 const translations: Record<Language, Record<string, any>> = {
   zh: {
+    common: {
+      select: "请选择...",
+      search: "快速搜索过滤...",
+      noMatch: "未找到匹配项",
+    },
     nav: {
       brand: "MatchLambda",
       version: "v1.3.0",
@@ -24,6 +29,7 @@ const translations: Record<Language, Record<string, any>> = {
       langSwitch: "English",
       free: "免费版",
       analyst: "ANALYST 专家",
+      admin: "⚙️ 管理后台",
     },
     tabs: {
       picks: "🎯 今日智能推荐 (Daily Picks)",
@@ -67,11 +73,21 @@ const translations: Record<Language, Record<string, any>> = {
       recMarket: "推荐方案 / 盘口",
       modelVsFair: "模型概率 / 理论赔率",
       fair: "公正:",
-      topScores: "预测最可能比分:",
+      topScores: "单项高频比分 (众数):",
+      topScoresHint: "单项比分反映出现概率最高的具体单一赛果，而大小球等盘口为所有对应进球比分之和",
+      overUnderSplit: "2.5 球盘口概率对比",
+      over25: "大 2.5 球",
+      under25: "小 2.5 球",
+      under25Detail: "≤ 2 球 (0-0, 1-0, 0-1, 1-1, 2-0, 0-2)",
+      over25Detail: "≥ 3 球 (2-1, 1-2, 2-2, 3-0...)",
+      modeLabel: "单场众数",
+      goalsSuffix: "球",
       aiRationale: "AI 核心拆解理由",
       matrixBtn: "完整 6x6 矩阵",
       starUnit: "场",
       setsUnit: "套",
+      modelEstimateOnly: "仅模型估计",
+      copyFailed: "复制失败，请手动复制。",
     },
     leagues: {
       all: "全部赛事",
@@ -121,6 +137,8 @@ const translations: Record<Language, Record<string, any>> = {
       profit: "总净利润",
       equityCurve: "资金增长净值曲线 (Equity Curve)",
       recentTrades: "近期实盘交易审计流水",
+      refresh: "刷新回测",
+      chartLabel: "资金曲线",
     },
     simulator: {
       title: "蒙特卡洛多路径破产风险模拟器",
@@ -141,6 +159,68 @@ const translations: Record<Language, Record<string, any>> = {
       kellyCalc: "凯利资金计算器",
       analystExclusive: "此功能为 ANALYST 专家专享",
       unlock: "立即升级解锁",
+      loading: "正在计算 Dixon–Coles 概率与衍生盘口...",
+      loadFailed: "无法加载赛事分析。",
+      accessRestricted: "无法查看分析",
+      escHint: "按 ESC 键或点击外部遮罩亦可关闭",
+      closeWindow: "关闭窗口",
+      lambdaHome: "主队进攻强度 (λ)",
+      muAway: "客队进攻强度 (μ)",
+      rho: "低分修正 (ρ)",
+      expectedTotal: "预期总进球",
+      goalsUnit: "期望球",
+      rhoUnit: "关联度",
+      goalsShort: "球",
+      match1x2Title: "1X2 胜平负模型概率与市场报价",
+      bookmakerLine: "机构: {book}（去水: {method}）",
+      outcome: "结果",
+      modelProb: "模型概率",
+      marketProb: "市场去水概率",
+      decimalOdds: "小数赔率",
+      expectedValue: "期望值 (EV)",
+      halfKelly: "半凯利",
+      totalsTitle: "进球大小球概率与公允赔率",
+      line15: "1.5 球盘口",
+      line25: "2.5 球核心盘口",
+      line35: "3.5 球盘口",
+      over: "大于",
+      under: "小于",
+      bttsTitle: "双方均有进球 (BTTS)",
+      bttsYes: "BTTS: 是",
+      bttsYesHint: "两队在常规时间内均至少打进 1 球",
+      bttsNo: "BTTS: 否",
+      bttsNoHint: "至少有一队被零封",
+      fairOdds: "公允赔率",
+      handicapTitle: "亚洲让球盘",
+      homeMinus05: "主队 -0.5 球",
+      homeMinus05Hint: "主队净胜 1 球及以上",
+      homePlus05: "主队 +0.5 球",
+      homePlus05Hint: "主队不败",
+      homeMinus15: "主队 -1.5 球",
+      homeMinus15Hint: "主队净胜 2 球及以上",
+      homePlus15: "主队 +1.5 球",
+      homePlus15Hint: "主队净负不超过 1 球",
+      fair: "公允",
+      dcTitle: "双重机会与平局退款",
+      dc1x: "1X（主胜或平局）",
+      dcX2: "X2（平局或客胜）",
+      dc12: "12（分胜负）",
+      dnbTitle: "平局退款 (DNB)",
+      dnbHome: "DNB 主胜",
+      dnbAway: "DNB 客胜",
+      matrixTitle: "6×6 比分概率矩阵",
+      omittedTail: "截断尾部质量",
+      matrixAxes: "行: 主队进球 (0–5) | 列: 客队进球 (0–5)",
+      topScores: "最可能的 3 个比分",
+      trainingCutoff: "训练截止",
+      decisionCutoff: "决策截止",
+      kellyTitle: "本场凯利下注计算器",
+      bankrollPrompt: "可用总本金 ($)",
+      oddsWord: "赔率",
+      halfKellyPct: "半凯利比例",
+      suggestedStake: "建议下注",
+      expectedProfit: "期望利润",
+      noData: "—",
       tabs: {
         matchOdds: "1X2 独赢盘",
         totals: "大小球 (Totals)",
@@ -168,6 +248,9 @@ const translations: Record<Language, Record<string, any>> = {
       monthly: "30天通行证",
       quarterly: "270天赛季通行证",
       instantActivation: "支付确认后自动开通",
+      disclaimer: "概率与期望值为模型估计，不构成收益承诺。",
+      pollError: "暂时无法刷新支付状态。",
+      popupBlocked: "浏览器拦截了支付窗口，请使用下方收银台链接。",
     },
     disclaimer: {
       title: "免责声明: ",
@@ -175,6 +258,11 @@ const translations: Record<Language, Record<string, any>> = {
     },
   },
   en: {
+    common: {
+      select: "Please select...",
+      search: "Quick search...",
+      noMatch: "No matching options",
+    },
     nav: {
       brand: "MatchLambda",
       version: "v1.3.0",
@@ -186,6 +274,7 @@ const translations: Record<Language, Record<string, any>> = {
       langSwitch: "中文",
       free: "FREE",
       analyst: "ANALYST PRO",
+      admin: "⚙️ Admin Ops",
     },
     tabs: {
       picks: "🎯 Daily AI Picks & Parlays",
@@ -229,11 +318,21 @@ const translations: Record<Language, Record<string, any>> = {
       recMarket: "Recommended Selection / Market",
       modelVsFair: "Model Prob / Fair Odds",
       fair: "Fair:",
-      topScores: "Most Likely Scores:",
+      topScores: "Top Score Modes:",
+      topScoresHint: "Single scores represent statistical modes, while Over/Under aggregates all compliant scorelines",
+      overUnderSplit: "Over/Under 2.5 Goals Split",
+      over25: "Over 2.5 Goals",
+      under25: "Under 2.5 Goals",
+      under25Detail: "≤ 2 Goals (0-0, 1-0, 0-1, 1-1, 2-0, 0-2)",
+      over25Detail: "≥ 3 Goals (2-1, 1-2, 2-2, 3-0...)",
+      modeLabel: "Mode",
+      goalsSuffix: "G",
       aiRationale: "AI Model Rationale",
       matrixBtn: "Full 6x6 Matrix",
       starUnit: "matches",
       setsUnit: "sets",
+      modelEstimateOnly: "Model estimate only",
+      copyFailed: "Could not copy. Please copy manually.",
     },
     leagues: {
       all: "All Leagues",
@@ -283,6 +382,8 @@ const translations: Record<Language, Record<string, any>> = {
       profit: "Net Profit",
       equityCurve: "Portfolio Equity Growth Curve",
       recentTrades: "Sample Trade Audit Log",
+      refresh: "Refresh backtest",
+      chartLabel: "Equity curve",
     },
     simulator: {
       title: "Monte Carlo Portfolio & Ruin Risk Simulator",
@@ -303,6 +404,68 @@ const translations: Record<Language, Record<string, any>> = {
       kellyCalc: "Kelly Staking Calculator",
       analystExclusive: "ANALYST Pro Access Only",
       unlock: "Unlock Pro Access",
+      loading: "Computing Dixon–Coles probabilities and derivative markets...",
+      loadFailed: "Failed to load match analysis.",
+      accessRestricted: "Access restricted",
+      escHint: "Press ESC or click the backdrop to close",
+      closeWindow: "Close",
+      lambdaHome: "Home attack rate (λ)",
+      muAway: "Away attack rate (μ)",
+      rho: "Low-score rho (ρ)",
+      expectedTotal: "Expected total goals",
+      goalsUnit: "xG",
+      rhoUnit: "corr.",
+      goalsShort: "goals",
+      match1x2Title: "1X2 model probability and market price",
+      bookmakerLine: "Bookmaker: {book} (De-juice: {method})",
+      outcome: "Outcome",
+      modelProb: "Model Prob",
+      marketProb: "Shin Market Prob",
+      decimalOdds: "Decimal Odds",
+      expectedValue: "Expected Value (EV)",
+      halfKelly: "Half-Kelly",
+      totalsTitle: "Totals probabilities and fair odds",
+      line15: "Line 1.5",
+      line25: "Line 2.5",
+      line35: "Line 3.5",
+      over: "Over",
+      under: "Under",
+      bttsTitle: "Both teams to score (BTTS)",
+      bttsYes: "BTTS: Yes",
+      bttsYesHint: "Both teams score at least once in regulation",
+      bttsNo: "BTTS: No",
+      bttsNoHint: "At least one team is kept scoreless",
+      fairOdds: "Fair odds",
+      handicapTitle: "Asian handicap",
+      homeMinus05: "Home -0.5",
+      homeMinus05Hint: "Home wins by 1+",
+      homePlus05: "Home +0.5",
+      homePlus05Hint: "Home does not lose",
+      homeMinus15: "Home -1.5",
+      homeMinus15Hint: "Home wins by 2+",
+      homePlus15: "Home +1.5",
+      homePlus15Hint: "Home loses by at most 1",
+      fair: "Fair",
+      dcTitle: "Double chance and draw no bet",
+      dc1x: "1X (home or draw)",
+      dcX2: "X2 (draw or away)",
+      dc12: "12 (no draw)",
+      dnbTitle: "Draw no bet (DNB)",
+      dnbHome: "DNB home",
+      dnbAway: "DNB away",
+      matrixTitle: "6×6 score probability matrix",
+      omittedTail: "Omitted tail mass",
+      matrixAxes: "Rows: home goals (0–5) | Columns: away goals (0–5)",
+      topScores: "Top 3 likely scores",
+      trainingCutoff: "Training cutoff",
+      decisionCutoff: "Decision cutoff",
+      kellyTitle: "Kelly stake calculator",
+      bankrollPrompt: "Available bankroll ($)",
+      oddsWord: "Odds",
+      halfKellyPct: "Half-Kelly share",
+      suggestedStake: "Suggested stake",
+      expectedProfit: "Expected profit",
+      noData: "—",
       tabs: {
         matchOdds: "1X2 Regulation",
         totals: "Totals (Over/Under)",
@@ -330,6 +493,9 @@ const translations: Record<Language, Record<string, any>> = {
       monthly: "30-Day Pass",
       quarterly: "270-Day Season Pass",
       instantActivation: "Activated after payment confirmation",
+      disclaimer: "Probabilities and EV are model estimates, not a promise of profit.",
+      pollError: "Could not refresh payment status.",
+      popupBlocked: "The checkout window was blocked. Use the link below.",
     },
     disclaimer: {
       title: "Analytical Disclaimer: ",
@@ -344,6 +510,10 @@ const I18nContext = createContext<I18nContextType>({
   toggleLang: () => {},
   t: (key: string) => key,
 });
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [lang, setLangState] = useState<Language>("zh");
@@ -361,20 +531,34 @@ export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
-  const setLang = (newLang: Language) => {
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = lang;
+    }
+  }, [lang]);
+
+  const setLang = useCallback((newLang: Language) => {
     setLangState(newLang);
     try {
       localStorage.setItem("matchlambda_lang", newLang);
     } catch {
       // Ignore
     }
-  };
+  }, []);
 
-  const toggleLang = () => {
-    setLang(lang === "zh" ? "en" : "zh");
-  };
+  const toggleLang = useCallback(() => {
+    setLangState((prev) => {
+      const next: Language = prev === "zh" ? "en" : "zh";
+      try {
+        localStorage.setItem("matchlambda_lang", next);
+      } catch {
+        // Ignore
+      }
+      return next;
+    });
+  }, []);
 
-  const t = (key: string, params?: Record<string, string | number>): string => {
+  const t = useCallback((key: string, params?: Record<string, string | number>): string => {
     const keys = key.split(".");
     let current: any = translations[lang];
 
@@ -382,7 +566,6 @@ export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (current && typeof current === "object" && k in current) {
         current = current[k];
       } else {
-        // Fallback to English if missing in Chinese
         let fallback: any = translations.en;
         for (const fbKey of keys) {
           if (fallback && typeof fallback === "object" && fbKey in fallback) {
@@ -402,15 +585,20 @@ export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (params) {
       return Object.entries(params).reduce((acc, [paramKey, paramVal]) => {
-        return acc.replace(new RegExp(`\\{${paramKey}\\}`, "g"), String(paramVal));
+        return acc.replace(new RegExp(`\\{${escapeRegExp(paramKey)}\\}`, "g"), String(paramVal));
       }, current);
     }
 
     return current;
-  };
+  }, [lang]);
+
+  const value = useMemo(
+    () => ({ lang, setLang, toggleLang, t }),
+    [lang, setLang, toggleLang, t]
+  );
 
   return (
-    <I18nContext.Provider value={{ lang, setLang, toggleLang, t }}>
+    <I18nContext.Provider value={value}>
       {children}
     </I18nContext.Provider>
   );

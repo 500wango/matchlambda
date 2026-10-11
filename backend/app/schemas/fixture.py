@@ -55,3 +55,10 @@ class FixturesResponse(BaseModel):
     limit: int
     offset: int
     fixtures: List[FixtureItem]
+    # Populated only for the has_value filter, which is evaluated in Python over
+    # a bounded scan window. `scanned_candidates` is how many fixtures were
+    # scanned, `scan_truncated` is true when the window was hit, and `total` is
+    # the number of value candidates found within that window.
+    scan_cap: Optional[int] = None
+    scanned_candidates: Optional[int] = None
+    scan_truncated: bool = False

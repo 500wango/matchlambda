@@ -73,11 +73,13 @@ def calculate_match_distribution(
     K = 5
     while True:
         # Use survival functions to avoid cancellation when lambda is large.
-        tail_x = float(poisson.sf(K, lambda_home))
-        tail_y = float(poisson.sf(K, mu_away))
-        # Dixon-Coles corrections only affect {0,1}x{0,1}, which sum to zero.
-        # For K >= 1, the omitted tail mass <= tail_x + tail_y
-        omitted_bound = max(0.0, tail_x) + max(0.0, tail_y)
+        tail_x = max(0.0, float(poisson.sf(K, lambda_home)))
+        tail_y = max(0.0, float(poisson.sf(K, mu_away)))
+        # Dixon-Coles corrections affect only {0,1}x{0,1}, which is inside the
+        # support for K >= 1 and sums to zero. The omitted mass is therefore
+        # exactly the union P(X > K or Y > K) = tail_x + tail_y - tail_x*tail_y,
+        # tighter than the old union bound tail_x + tail_y.
+        omitted_bound = tail_x + tail_y - tail_x * tail_y
         if omitted_bound <= 1e-10:
             break
         if K >= 100:
@@ -154,6 +156,7 @@ def fit_dixon_coles(
     team_list: List[str],
     training_cutoff: datetime,
     xi: float = 0.0018,
+    min_matches: int = 5,
 ) -> Dict[str, Any]:
     """
     Fits Dixon-Coles model using SLSQP with constraints:
@@ -164,7 +167,7 @@ def fit_dixon_coles(
     team_to_idx = {team_id: idx for idx, team_id in enumerate(team_list)}
     n_teams = len(team_list)
 
-    if n_teams < 2 or len(matches) < 5:
+    if n_teams < 2 or len(matches) < min_matches:
         raise ValueError("Insufficient match history or teams for Dixon-Coles fit.")
 
     # Filter matches available by training_cutoff
@@ -175,8 +178,8 @@ def fit_dixon_coles(
             weight = math.exp(-xi * days_ago)
             eligible_matches.append((team_to_idx[h], team_to_idx[a], hs, as_, weight))
 
-    if len(eligible_matches) < 5:
-        raise ValueError("Not enough eligible matches before training cutoff.")
+    if len(eligible_matches) < min_matches:
+        raise ValueError(f"Not enough eligible matches before training cutoff (need {min_matches}).")
 
     # Parameter vector layout:
     # [alpha_0 ... alpha_{N-1}, beta_0 ... beta_{N-1}, gamma (home_advantage), rho]
@@ -197,19 +200,12 @@ def fit_dixon_coles(
             lam = math.exp(alphas[h_idx] - betas[a_idx] + gamma)
             mu = math.exp(alphas[a_idx] - betas[h_idx])
 
-            # Enforce all four tau factors >= 1e-10 for every training match
-            f00 = 1.0 - lam * mu * rho
-            f01 = 1.0 + lam * rho
-            f10 = 1.0 + mu * rho
-            f11 = 1.0 - rho
-            if f00 < 1e-10 or f01 < 1e-10 or f10 < 1e-10 or f11 < 1e-10:
-                return 1e12
-
             t_val = tau(hs, as_, lam, mu, rho)
-            if t_val <= 1e-10:
-                return 1e12
-
-            log_t = math.log(t_val)
+            # Below the 1e-10 constraint floor, follow the tangent of log so the slope stays nonzero.
+            if t_val >= 1e-10:
+                log_t = math.log(t_val)
+            else:
+                log_t = math.log(1e-10) + (t_val - 1e-10) / 1e-10
             log_p_home = pois_logpmf(hs, lam)
             log_p_away = pois_logpmf(as_, mu)
 
@@ -222,13 +218,16 @@ def fit_dixon_coles(
     def sum_alpha_constraint(params: np.ndarray) -> float:
         return float(np.sum(params[:n_teams]))
 
+    # λ and μ depend only on the ordered pair, so one constraint set per matchup.
+    unique_matchups = sorted({(h_idx, a_idx) for h_idx, a_idx, _, _, _ in eligible_matches})
+
     def tau_constraints(params: np.ndarray) -> np.ndarray:
         alphas = params[:n_teams]
         betas = params[n_teams : 2 * n_teams]
         gamma = params[2 * n_teams]
         rho = params[2 * n_teams + 1]
         factors = []
-        for h_idx, a_idx, _, _, _ in eligible_matches:
+        for h_idx, a_idx in unique_matchups:
             lam = math.exp(alphas[h_idx] - betas[a_idx] + gamma)
             mu = math.exp(alphas[a_idx] - betas[h_idx])
             factors.extend((

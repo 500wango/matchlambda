@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
@@ -23,32 +23,72 @@ from app.math.freshness import is_placeholder_quote, latest_eligible_quote
 
 router = APIRouter(prefix="/matches", tags=["Matches"])
 
-SUPPORTED_LEAGUES = {"EPL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1"}
-
 
 @router.get("/leagues")
 async def get_leagues(db: AsyncSession = Depends(get_db)):
     """
-    Returns list of all active European leagues supported by the engine.
+    Active leagues with PRD §2.1 eligibility flags. Before the first gate
+    snapshot exists the gate is inert and every active league is shown.
     """
     from app.models import League
+    from app.services.league_gate import get_eligibility_snapshot
+
     stmt = select(League).where(League.active == True)
     leagues = (await db.execute(stmt)).scalars().all()
-    return [
-        {"id": l.id, "name": l.name, "country": l.country}
-        for l in leagues
-    ]
+    snapshot = await get_eligibility_snapshot(db)
+    gate = (snapshot or {}).get("leagues") if isinstance(snapshot, dict) else None
+
+    result = []
+    for l in leagues:
+        entry: Dict[str, Any] = {"id": l.id, "name": l.name, "country": l.country}
+        if snapshot:
+            info = (gate or {}).get(l.id)
+            if info:
+                entry["eligible"] = bool(info.get("eligible"))
+                entry["basis"] = info.get("basis") or "NOT_EVALUATED"
+                entry["reasons"] = [str(r).split(":")[0] for r in info.get("reasons") or []]
+            else:
+                # Leagues absent from the snapshot have no finished-match
+                # evidence at all and stay pending under an active gate.
+                entry["eligible"] = False
+                entry["basis"] = "NOT_EVALUATED"
+                entry["reasons"] = ["NOT_EVALUATED"]
+        else:
+            entry["eligible"] = True
+            entry["basis"] = "GATE_INACTIVE"
+            entry["reasons"] = []
+        result.append(entry)
+    return result
+
+
+@router.get("/leagues/eligibility")
+async def get_league_eligibility_snapshot(db: AsyncSession = Depends(get_db)):
+    """Public audit view of the league gate snapshot (PRD §2.1 acceptance #6)."""
+    from app.services.league_gate import get_eligibility_snapshot
+
+    snapshot = await get_eligibility_snapshot(db)
+    if not snapshot:
+        return {"status": "NOT_COMPUTED", "computed_at": None, "thresholds": None, "leagues": {}}
+    return {"status": "READY", **snapshot}
 
 
 def build_outcomes(pred: Prediction, odds: OddsSnapshot) -> Tuple[List[OutcomeItem], bool]:
     # HOME, DRAW, AWAY in exact order
-    h_ev = calculate_ev(pred.prob_home_win, float(odds.home_odds))
-    d_ev = calculate_ev(pred.prob_draw, float(odds.draw_odds))
-    a_ev = calculate_ev(pred.prob_away_win, float(odds.away_odds))
+    home_odds = float(odds.home_odds)
+    draw_odds = float(odds.draw_odds)
+    away_odds = float(odds.away_odds)
+    # Defensive: reject quotes whose odds are missing or non-finite so a bad row
+    # returns MISSING_QUOTE upstream rather than raising a 500 TypeError.
+    if not (math.isfinite(home_odds) and math.isfinite(draw_odds) and math.isfinite(away_odds)):
+        raise ValueError("Odds snapshot contains non-finite odds.")
 
-    h_hk = calculate_half_kelly(pred.prob_home_win, float(odds.home_odds))
-    d_hk = calculate_half_kelly(pred.prob_draw, float(odds.draw_odds))
-    a_hk = calculate_half_kelly(pred.prob_away_win, float(odds.away_odds))
+    h_ev = calculate_ev(pred.prob_home_win, home_odds)
+    d_ev = calculate_ev(pred.prob_draw, draw_odds)
+    a_ev = calculate_ev(pred.prob_away_win, away_odds)
+
+    h_hk = calculate_half_kelly(pred.prob_home_win, home_odds)
+    d_hk = calculate_half_kelly(pred.prob_draw, draw_odds)
+    a_hk = calculate_half_kelly(pred.prob_away_win, away_odds)
 
     outcomes = [
         OutcomeItem(
@@ -108,7 +148,9 @@ def evaluate_fixture_analysis(
             "has_value": False,
         }
 
-    if match.match_date != pred.kickoff_at_prediction:
+    # Kickoff times are stored independently; allow a small hysteresis so minor
+    # serialization/zone differences don't falsely mark a valid fixture as changed.
+    if abs((match.match_date - pred.kickoff_at_prediction).total_seconds()) > 300.0:
         return {
             "data_status": "STALE",
             "reason": "FIXTURE_CHANGED",
@@ -176,7 +218,16 @@ def evaluate_fixture_analysis(
         }
 
     # Both current and eligible
-    outcomes, has_val = build_outcomes(pred, odds)
+    try:
+        outcomes, has_val = build_outcomes(pred, odds)
+    except (ValueError, TypeError):
+        return {
+            "data_status": "AVAILABLE",
+            "reason": "MISSING_QUOTE",
+            "prediction": pred,
+            "comparison": None,
+            "has_value": False,
+        }
     return {
         "data_status": "AVAILABLE",
         "reason": None,
@@ -191,7 +242,7 @@ async def get_fixtures(
     league_id: Optional[str] = Query(None),
     days_ahead: int = Query(10, ge=1, le=30),
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=1000),
     has_value: Optional[bool] = Query(None),
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
@@ -251,15 +302,19 @@ async def get_fixtures(
     end_date = now + timedelta(days=days_ahead)
 
     # Base query for scheduled matches
-    query = (
-        select(Match)
-        .options(
-            selectinload(Match.home_team),
-            selectinload(Match.away_team),
+    load_options = [
+        selectinload(Match.home_team),
+        selectinload(Match.away_team),
+    ]
+    if is_analyst:
+        load_options.extend([
             selectinload(Match.odds_snapshots),
             selectinload(Match.predictions).selectinload(Prediction.odds_snapshot),
             selectinload(Match.predictions).selectinload(Prediction.model_parameters),
-        )
+        ])
+    query = (
+        select(Match)
+        .options(*load_options)
         .where(
             Match.status == "SCHEDULED",
             Match.match_date >= now,
@@ -272,31 +327,40 @@ async def get_fixtures(
 
     query = query.order_by(Match.match_date.asc(), Match.id.asc())
 
+    # has_value is computed in Python, so it needs a bounded scan window. The
+    # unfiltered branch uses SQL count/limit/offset; the has_value branch scans
+    # the first HAS_VALUE_SCAN_CAP candidates, filters in Python, then paginates
+    # the filtered list. `total` therefore counts value candidates inside the
+    # scan window (not the whole table); the response carries scan_cap,
+    # scanned_candidates and scan_truncated so callers can tell the difference.
+    HAS_VALUE_SCAN_CAP = 400
+    scan_cap: Optional[int] = None
+    scanned_candidates: Optional[int] = None
+    scan_truncated = False
+    if has_value is None:
+        count_query = select(func.count()).select_from(Match).where(
+            Match.status == "SCHEDULED",
+            Match.match_date >= now,
+            Match.match_date < end_date,
+        )
+        if filter_league_ids:
+            count_query = count_query.where(Match.league_id.in_(filter_league_ids))
+        total_matches = int((await db.execute(count_query)).scalar() or 0)
+        query = query.offset(offset).limit(limit)
+    else:
+        total_matches = None
+        scan_cap = HAS_VALUE_SCAN_CAP
+        query = query.limit(HAS_VALUE_SCAN_CAP)
+
     all_matches = (await db.execute(query)).scalars().all()
+
+    if has_value is not None:
+        scanned_candidates = len(all_matches)
+        scan_truncated = len(all_matches) == HAS_VALUE_SCAN_CAP
 
     # Process fixtures
     evaluated_items = []
     for m in all_matches:
-        # Latest prediction by as_of
-        latest_pred = None
-        if m.predictions:
-            latest_pred = max(m.predictions, key=lambda p: p.as_of)
-
-        odds_snap = None
-        if latest_pred:
-            match_quotes = [
-                quote for quote in m.odds_snapshots
-                if quote.quote_at <= latest_pred.as_of
-            ]
-            odds_snap = latest_eligible_quote(match_quotes, latest_pred.as_of)
-
-        eval_res = evaluate_fixture_analysis(m, latest_pred, odds_snap, now)
-
-        # Apply has_value filter if requested
-        if has_value is not None:
-            if eval_res["has_value"] != has_value:
-                continue
-
         base_item = {
             "match_id": m.id,
             "league_id": m.league_id,
@@ -307,6 +371,22 @@ async def get_fixtures(
         }
 
         if is_analyst:
+            # Latest prediction by as_of
+            latest_pred = None
+            if m.predictions:
+                latest_pred = max(m.predictions, key=lambda p: p.as_of)
+
+            odds_snap = None
+            if latest_pred:
+                match_quotes = [
+                    quote for quote in m.odds_snapshots
+                    if quote.quote_at <= latest_pred.as_of
+                ]
+                odds_snap = latest_eligible_quote(match_quotes, latest_pred.as_of)
+
+            eval_res = evaluate_fixture_analysis(m, latest_pred, odds_snap, now)
+            if has_value is not None and eval_res["has_value"] != has_value:
+                continue
             pred_summary = None
             if eval_res["prediction"]:
                 p = eval_res["prediction"]
@@ -339,19 +419,29 @@ async def get_fixtures(
                 comparison=comp_summary,
             )
         else:
-            # Anonymous or free user receives strictly base fields
+            # Anonymous or free users never request has_value (rejected above).
             item = FixtureItem(**base_item)
 
         evaluated_items.append(item)
 
-    total = len(evaluated_items)
-    page_items = evaluated_items[offset : offset + limit]
+    if has_value is None:
+        total = total_matches
+        page_items = evaluated_items
+    else:
+        # `offset` indexes the filtered candidate list, which is derived from
+        # the whole scan window (candidates are scanned from index 0), so an
+        # offset inside that window positions correctly.
+        total = len(evaluated_items)
+        page_items = evaluated_items[offset : offset + limit]
 
     return FixturesResponse(
         total=total,
         limit=limit,
         offset=offset,
         fixtures=page_items,
+        scan_cap=scan_cap,
+        scanned_candidates=scanned_candidates,
+        scan_truncated=scan_truncated,
     )
 
 
@@ -369,7 +459,7 @@ async def get_match_analysis(
         )
         .where(Match.id == match_id)
     )
-    match = (await db.execute(query)).scalars().first()
+    match = (await db.execute(query)).scalars().one_or_none()
     if not match:
         raise AppException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -445,6 +535,9 @@ async def get_match_analysis(
             lambda_home=p.lambda_home,
             mu_away=p.mu_away,
             omitted_mass=p.omitted_mass,
+            prob_home_win=p.prob_home_win,
+            prob_draw=p.prob_draw,
+            prob_away_win=p.prob_away_win,
         )
 
     return MatchAnalysisResponse(

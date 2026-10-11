@@ -1,72 +1,179 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Calculator, ShieldAlert, Sparkles, RefreshCw, TrendingUp, Percent, DollarSign, Activity } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Calculator, RefreshCw, Activity, ShieldCheck } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { useDebounced } from "@/lib/useDebounced";
 
 interface BankrollSimulatorViewProps {
-  isAnalyst: boolean;
-  onOpenPricing: () => void;
+  isAnalyst?: boolean;
+  onOpenPricing?: () => void;
 }
 
-export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () => {
+function finiteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function fmtMoney(value: unknown): string {
+  const n = finiteNumber(value);
+  return n == null ? "—" : `$${n.toLocaleString()}`;
+}
+
+function fmtPct(value: unknown, withPlus = false): string {
+  const n = finiteNumber(value);
+  if (n == null) return "—";
+  if (withPlus && n > 0) return `+${n}%`;
+  return `${n}%`;
+}
+
+function pathExtremes(trajectories: unknown[]): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const path of trajectories) {
+    if (!Array.isArray(path)) continue;
+    for (const raw of path) {
+      const n = finiteNumber(raw);
+      if (n == null) continue;
+      if (n < min) min = n;
+      if (n > max) max = n;
+    }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  return { min, max };
+}
+
+export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = ({
+  isAnalyst = false,
+  onOpenPricing = () => {},
+}) => {
   const { lang, t } = useI18n();
   const isEn = lang === "en";
+  // Language only affects copy, not the simulation request; a ref keeps a
+  // language switch from re-firing the Monte Carlo run.
+  const isEnRef = useRef(isEn);
+  isEnRef.current = isEn;
 
-  const [bankroll, setBankroll] = useState<number>(10000);
+  const [bankrollInput, setBankrollInput] = useState("10000");
   const [kellyFraction, setKellyFraction] = useState<number>(0.5);
-  const [avgEv, setAvgEv] = useState<number>(0.065);
-  const [avgOdds, setAvgOdds] = useState<number>(2.10);
+  const [avgEv] = useState<number>(0.065);
+  const [avgOdds] = useState<number>(2.1);
   const [numBets, setNumBets] = useState<number>(100);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [monthlyPrice, setMonthlyPrice] = useState<number | null>(null);
+
+  const debouncedBankrollInput = useDebounced(bankrollInput, 500);
+  const debouncedKelly = useDebounced(kellyFraction, 500);
+  const debouncedAvgEv = useDebounced(avgEv, 500);
+  const debouncedAvgOdds = useDebounced(avgOdds, 500);
+  const debouncedNumBets = useDebounced(numBets, 500);
+  const bankroll = Number(debouncedBankrollInput);
 
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const runSimulation = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const url = `/analytics/monte-carlo?bankroll=${bankroll}&kelly_fraction=${kellyFraction}&avg_ev=${avgEv}&avg_odds=${avgOdds}&num_bets=${numBets}&num_simulations=1000`;
-      const res = await apiRequest<any>(url, { method: "POST" });
-      setData(res);
-    } catch (err: any) {
-      setError(err?.message || (isEn ? "Failed to run Monte Carlo simulation." : "执行蒙特卡洛模拟失败。"));
-    } finally {
-      setLoading(false);
-    }
-  }, [bankroll, kellyFraction, avgEv, avgOdds, numBets, isEn]);
+  useEffect(() => {
+    if (isAnalyst) return;
+    let cancelled = false;
+    apiRequest<{ monthly_price_usd: number }>("/payments/pricing")
+      .then((res) => {
+        if (cancelled) return;
+        const price = Number(res?.monthly_price_usd);
+        setMonthlyPrice(Number.isFinite(price) ? price : Number.NaN);
+      })
+      .catch(() => {
+        // Locked screen stays without a price until the public quote loads.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAnalyst]);
 
   useEffect(() => {
-    runSimulation();
-  }, [runSimulation]);
+    if (!isAnalyst) {
+      setLoading(false);
+      return;
+    }
+    if (!Number.isFinite(bankroll) || bankroll < 100) {
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams({
+      bankroll: String(bankroll),
+      kelly_fraction: String(debouncedKelly),
+      avg_ev: String(debouncedAvgEv),
+      avg_odds: String(debouncedAvgOdds),
+      num_bets: String(debouncedNumBets),
+      num_simulations: "1000",
+    });
+    apiRequest<any>(`/analytics/monte-carlo?${params.toString()}`, {
+      method: "POST",
+      signal: controller.signal,
+    })
+      .then((res) => {
+        if (!active) return;
+        setData(res);
+        setError(null);
+      })
+      .catch((err: any) => {
+        if (!active || controller.signal.aborted || err?.code === "ABORTED") return;
+        setError(err?.message || (isEnRef.current ? "Failed to run Monte Carlo simulation." : "执行蒙特卡洛模拟失败。"));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort(new Error("Bankroll simulator unmounted"));
+    };
+  }, [
+    isAnalyst,
+    bankroll,
+    debouncedKelly,
+    debouncedAvgEv,
+    debouncedAvgOdds,
+    debouncedNumBets,
+    refreshNonce,
+  ]);
 
   const stats = data?.statistics;
   const trajectories = data?.sample_trajectories || [];
+  const doubleTarget = finiteNumber(bankroll);
 
   const renderTrajectoriesSvg = () => {
     if (trajectories.length === 0) return null;
     const width = 800;
     const height = 240;
     const padding = 40;
+    const bounds = pathExtremes(trajectories);
+    if (!bounds) return null;
 
-    let allVals: number[] = [];
-    trajectories.forEach((path: number[]) => {
-      allVals.push(...path);
-    });
-    const minVal = Math.max(0, Math.min(...allVals) * 0.9);
-    const maxVal = Math.max(...allVals) * 1.1;
+    const minVal = Math.max(0, bounds.min * 0.9);
+    const maxVal = bounds.max * 1.1;
     const range = maxVal - minVal || 1;
 
     const colors = [
       "#3b82f6", "#10b981", "#8b5cf6", "#ec4899",
-      "#f59e0b", "#06b6d4", "#14b8a6", "#6366f1"
+      "#f59e0b", "#06b6d4", "#14b8a6", "#6366f1",
     ];
 
     return (
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible">
-        {/* Horizontal grid */}
+      <svg
+        role="img"
+        aria-label={t("simulator.paths")}
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full h-auto overflow-visible"
+      >
         {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
           const y = height - padding - pct * (height - 2 * padding);
           const val = maxVal - pct * range;
@@ -80,12 +187,17 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
           );
         })}
 
-        {/* 10 Trajectories */}
         {trajectories.map((path: number[], pIdx: number) => {
+          if (!Array.isArray(path) || path.length === 0) return null;
           const color = colors[pIdx % colors.length];
+          const steps = Math.max(path.length - 1, 1);
           const points = path.map((val: number, stepIdx: number) => {
-            const x = padding + (stepIdx / (path.length - 1)) * (width - 2 * padding);
-            const y = height - padding - ((val - minVal) / range) * (height - 2 * padding);
+            const n = finiteNumber(val);
+            const x = padding + (stepIdx / steps) * (width - 2 * padding);
+            const y =
+              n == null
+                ? height - padding
+                : height - padding - ((n - minVal) / range) * (height - 2 * padding);
             return `${x},${y}`;
           });
 
@@ -104,9 +216,34 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
     );
   };
 
+  if (!isAnalyst) {
+    return (
+      <div className="border-y border-gray-800 py-16 text-center bg-[#0d121f] rounded-2xl p-8 border">
+        <ShieldCheck className="w-10 h-10 text-blue-400 mx-auto mb-3" />
+        <h2 className="text-xl font-bold text-white">{t("simulator.title")}</h2>
+        <p className="text-sm text-gray-400 mt-2 max-w-xl mx-auto">
+          {isEn
+            ? "An active Analyst Pass is required to run the Monte Carlo bankroll paths."
+            : "运行蒙特卡洛资金路径模拟需要 Analyst 权限。"}
+        </p>
+        <button
+          onClick={onOpenPricing}
+          className="mt-5 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl shadow-lg shadow-blue-600/25 transition"
+        >
+          {monthlyPrice == null
+            ? (isEn ? "Upgrade to Analyst Pass" : "开通 Analyst 专属通行证")
+            : !Number.isFinite(monthlyPrice)
+              ? (isEn ? "Upgrade to Analyst Pass (—)" : "开通 Analyst 专属通行证 (—)")
+              : (isEn
+                ? `Upgrade to Analyst Pass ($${Number.isInteger(monthlyPrice) ? monthlyPrice : monthlyPrice.toFixed(2)})`
+                : `开通 Analyst 专属通行证 ($${Number.isInteger(monthlyPrice) ? monthlyPrice : monthlyPrice.toFixed(2)})`)}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="bg-[#0f1523] border border-gray-800 rounded-2xl p-6 sm:p-7 shadow-2xl relative">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div>
@@ -122,7 +259,6 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
             </p>
           </div>
 
-          {/* Quick Config Form */}
           <div className="bg-[#090d16] border border-gray-800/80 rounded-xl p-4 flex flex-wrap items-center gap-4">
             <div>
               <label className="text-[11px] font-mono text-gray-400 block mb-1">
@@ -130,8 +266,12 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
               </label>
               <input
                 type="number"
-                value={bankroll}
-                onChange={(e) => setBankroll(Number(e.target.value))}
+                value={bankrollInput}
+                onChange={(e) => setBankrollInput(e.target.value)}
+                onBlur={() => {
+                  const n = Number(bankrollInput);
+                  if (!Number.isFinite(n) || n < 100) setBankrollInput("100");
+                }}
                 className="w-24 px-2.5 py-1.5 bg-[#0f1523] border border-gray-700 rounded-lg text-white font-mono text-xs font-bold"
               />
             </div>
@@ -166,8 +306,10 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
             </div>
             <div className="self-end">
               <button
-                onClick={runSimulation}
+                type="button"
+                onClick={() => setRefreshNonce((n) => n + 1)}
                 disabled={loading}
+                aria-label={isEn ? "Run simulation again" : "重新模拟"}
                 className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold text-xs flex items-center transition"
               >
                 <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} />
@@ -178,31 +320,38 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {error && (
+        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-sm text-red-300">
+          {error}
+        </div>
+      )}
+
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
             <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.expectedMedian")}</span>
             <span className="text-xl sm:text-2xl font-black text-emerald-400 mt-1 block">
-              ${stats.expected_bankroll_median.toLocaleString()}
+              {fmtMoney(stats.expected_bankroll_median)}
             </span>
             <span className="text-[10px] font-mono text-emerald-500 font-bold">
-              {isEn ? "Median Return" : "中位数收益"}: +{stats.median_growth_pct}%
+              {isEn ? "Median Return" : "中位数收益"}: {fmtPct(stats.median_growth_pct, true)}
             </span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
             <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.doubleProb")}</span>
             <span className="text-xl sm:text-2xl font-black text-blue-400 mt-1 block">
-              {stats.probability_doubling_pct}%
+              {fmtPct(stats.probability_doubling_pct)}
             </span>
-            <span className="text-[10px] font-mono text-gray-400">{isEn ? "Reaching" : "达到"} ${ (bankroll * 2).toLocaleString() }</span>
+            <span className="text-[10px] font-mono text-gray-400">
+              {isEn ? "Reaching" : "达到"} {doubleTarget == null ? "—" : fmtMoney(doubleTarget * 2)}
+            </span>
           </div>
 
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
             <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.bestCase")}</span>
             <span className="text-xl sm:text-2xl font-black text-purple-400 mt-1 block">
-              ${stats.best_case_p95.toLocaleString()}
+              {fmtMoney(stats.best_case_p95)}
             </span>
             <span className="text-[10px] font-mono text-gray-400">{isEn ? "Upside Limit" : "顺风上限区间"}</span>
           </div>
@@ -210,7 +359,7 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
             <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.worstCase")}</span>
             <span className="text-xl sm:text-2xl font-black text-amber-400 mt-1 block">
-              ${stats.worst_case_p5.toLocaleString()}
+              {fmtMoney(stats.worst_case_p5)}
             </span>
             <span className="text-[10px] font-mono text-gray-400">{isEn ? "Extreme Drawdown" : "极端连黑抗压底线"}</span>
           </div>
@@ -218,14 +367,13 @@ export const BankrollSimulatorView: React.FC<BankrollSimulatorViewProps> = () =>
           <div className="bg-[#0f1523] border border-gray-800 rounded-xl p-4">
             <span className="text-[11px] font-mono text-gray-400 block">{t("simulator.ruinRisk")}</span>
             <span className="text-xl sm:text-2xl font-black text-emerald-400 mt-1 block">
-              {stats.risk_of_ruin_pct}%
+              {fmtPct(stats.risk_of_ruin_pct)}
             </span>
             <span className="text-[10px] font-mono text-emerald-500 font-bold">{isEn ? "Safe Half-Kelly Buffer" : "严格半凯利免爆仓"}</span>
           </div>
         </div>
       )}
 
-      {/* Trajectories Visualizer */}
       <div className="bg-[#0f1523] border border-gray-800 rounded-2xl p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <div>

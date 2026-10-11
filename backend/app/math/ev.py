@@ -26,7 +26,10 @@ def calculate_half_kelly(prob: float, odds: float) -> float:
     if ev <= 0.0:
         return 0.0
     kelly = ev / b
-    return min(0.5, 0.5 * max(0.0, kelly))
+    # prob <= 1 implies kelly = (prob*odds - 1)/(odds - 1) <= 1, so
+    # 0.5 * kelly <= 0.5 and a min(0.5, ...) clamp could never bind; the plain
+    # half-Kelly fraction is already bounded.
+    return 0.5 * max(0.0, kelly)
 
 
 def has_value_signal(ev: float, threshold: float = 0.05) -> bool:

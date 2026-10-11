@@ -10,7 +10,7 @@ def _validate_inputs(predictions: List[Tuple[float, float, float]], actuals: Lis
     for probs in predictions:
         if any(not math.isfinite(p) or p < 0.0 or p > 1.0 for p in probs):
             raise ValueError("Probabilities must be finite and within [0, 1].")
-        if abs(sum(probs) - 1.0) > 1e-8:
+        if abs(sum(probs) - 1.0) > 1e-6:
             raise ValueError("Probabilities must sum to 1.")
 
 

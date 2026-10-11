@@ -46,6 +46,11 @@ yarn-error.log*
 # Database & local data
 *.sqlite3
 postgres_data/
+data/historical/
+backend/data/
+celerybeat-schedule
+*.pid
+*.log
 
 # IDE & OS
 .vscode/
@@ -54,3 +59,11 @@ postgres_data/
 *.swp
 *~
 *.tsbuildinfo
+
+# Local agent/tooling state
+.reasonix/
+reasonix.toml
+
+# Code-review reports stay local. They name reproducible exploits and list
+# weaknesses that are still unfixed, so they are not published with the source.
+docs/CODE_REVIEW_REPORT*.md

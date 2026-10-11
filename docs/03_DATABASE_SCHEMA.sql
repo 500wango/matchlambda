@@ -135,6 +135,7 @@ CREATE TABLE users (
     password_hash TEXT NOT NULL,
     plan_tier VARCHAR(16) NOT NULL DEFAULT 'FREE' CHECK (plan_tier IN ('FREE', 'ANALYST')),
     plan_expires_at TIMESTAMPTZ,
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (plan_tier <> 'ANALYST' OR plan_expires_at IS NOT NULL)
 );
@@ -144,10 +145,12 @@ CREATE TABLE crypto_invoices (
     user_id UUID NOT NULL REFERENCES users(id),
     order_id VARCHAR(64) NOT NULL UNIQUE,
     request_key UUID NOT NULL,
-    plan_type VARCHAR(32) NOT NULL CHECK (plan_type IN ('PRO_MONTHLY', 'PRO_SEASON')),
+    plan_type VARCHAR(32) NOT NULL CHECK (plan_type IN ('PRO_DAY', 'PRO_WEEK', 'PRO_MONTHLY', 'PRO_SEASON')),
     amount_usd NUMERIC(10, 2) NOT NULL CHECK (amount_usd > 0 AND amount_usd < 1000000),
     duration_days INT NOT NULL CHECK (
-        (plan_type = 'PRO_MONTHLY' AND duration_days = 30)
+        (plan_type = 'PRO_DAY' AND duration_days = 1)
+        OR (plan_type = 'PRO_WEEK' AND duration_days = 7)
+        OR (plan_type = 'PRO_MONTHLY' AND duration_days = 30)
         OR (plan_type = 'PRO_SEASON' AND duration_days = 270)
     ),
     gateway_invoice_id VARCHAR(128) UNIQUE,
@@ -168,3 +171,21 @@ CREATE TABLE crypto_invoices (
 -- Catalog price is selected server-side; invoice price/duration are immutable snapshots.
 -- Lock invoice then user when crediting; commit entitlement and credited_at together.
 -- Update updated_at explicitly in application writes; DEFAULT NOW() is not an update trigger.
+
+CREATE TABLE system_settings (
+    key VARCHAR(64) PRIMARY KEY,
+    value JSONB NOT NULL,
+    description TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_email VARCHAR(255) NOT NULL,
+    action VARCHAR(64) NOT NULL,
+    target VARCHAR(128),
+    details JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_audit_logs_created_at ON audit_logs (created_at DESC);
+

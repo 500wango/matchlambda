@@ -12,6 +12,9 @@ import os
 import sys
 import csv
 import json
+import time
+import traceback
+import urllib.error
 import urllib.request
 import io
 from pathlib import Path
@@ -50,15 +53,50 @@ LEAGUES = {
 }
 
 BASE_URL = "https://football-data.co.uk/mmz4281"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
+HEADERS = {"User-Agent": "MatchLambda/1.3 historical-downloader"}
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 def fetch_file(url: str) -> bytes:
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read()
+        status = getattr(resp, "status", 200)
+        if status != 200:
+            raise RuntimeError(f"HTTP {status}")
+        chunks = []
+        total = 0
+        while True:
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_RESPONSE_BYTES:
+                raise RuntimeError("response exceeded 8MB")
+            chunks.append(chunk)
+    raw = b"".join(chunks)
+    head = raw.lstrip()[:64].lower()
+    if head.startswith(b"<") or head.startswith(b"<!doctype"):
+        raise RuntimeError("response was HTML, not CSV")
+    return raw
+
+
+def fetch_file_with_retry(url: str, attempts: int = 3, base_delay: float = 1.0) -> bytes:
+    """fetch_file with exponential backoff. Re-raises the last error after attempts."""
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fetch_file(url)
+        except Exception as exc:  # noqa: BLE001 - retried, then surfaced to caller
+            last_error = exc
+            if attempt < attempts:
+                delay = base_delay * (2 ** (attempt - 1))
+                print(
+                    f"  ... attempt {attempt}/{attempts} failed ({exc}); retrying in {delay:.0f}s",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+    assert last_error is not None
+    raise last_error
 
 
 def decode_csv_content(raw_bytes: bytes) -> str:
@@ -72,33 +110,37 @@ def decode_csv_content(raw_bytes: bytes) -> str:
 
 def parse_csv_rows(text_content: str):
     """
-    Parses CSV text into (fieldnames, list of dicts).
+    Parses CSV text into (fieldnames, list of dicts, discarded row count).
     Ignores completely empty rows or trailing metadata notes.
     """
     reader = csv.reader(io.StringIO(text_content))
     rows = list(reader)
     if not rows:
-        return [], []
+        return [], [], 0
 
     raw_headers = [h.strip() for h in rows[0]]
-    # Filter valid headers
     headers = [h for h in raw_headers if h]
 
     data_rows = []
+    discarded = 0
     for r in rows[1:]:
         if not r or not any(r):
             continue
-        # Stop if we hit footer notes
         if len(r) > 0 and r[0].startswith("Key to"):
             break
+        if "HomeTeam" not in headers:
+            discarded += 1
+            continue
         row_dict = {}
         for idx, h in enumerate(headers):
             val = r[idx].strip() if idx < len(r) else ""
             row_dict[h] = val
-        if any(row_dict.values()) and ("HomeTeam" in row_dict and row_dict["HomeTeam"]):
+        if row_dict.get("HomeTeam"):
             data_rows.append(row_dict)
+        else:
+            discarded += 1
 
-    return headers, data_rows
+    return headers, data_rows, discarded
 
 
 def write_combined_csv(output_path: Path, all_records: list):
@@ -145,9 +187,11 @@ def main():
         "source": "https://football-data.co.uk/englandm.php",
         "leagues": {},
         "total_matches": 0,
+        "failures": [],
     }
 
     all_matches_combined = []
+    failures = []
 
     for div_code, league_info in LEAGUES.items():
         league_name = league_info["name"]
@@ -165,13 +209,16 @@ def main():
             out_file = subdir / out_filename
 
             try:
-                raw_bytes = fetch_file(url)
-                # Save raw file
+                raw_bytes = fetch_file_with_retry(url)
+                text_content = decode_csv_content(raw_bytes)
+                if "HomeTeam" not in text_content.splitlines()[0]:
+                    raise RuntimeError("CSV header has no HomeTeam column")
                 with open(out_file, "wb") as f:
                     f.write(raw_bytes)
 
-                text_content = decode_csv_content(raw_bytes)
-                headers, records = parse_csv_rows(text_content)
+                headers, records, discarded = parse_csv_rows(text_content)
+                if discarded:
+                    print(f"  ! {season_label}: discarded {discarded} unparsed rows", file=sys.stderr)
 
                 # Annotate with metadata
                 for rec in records:
@@ -193,7 +240,17 @@ def main():
                     "file_size_bytes": len(raw_bytes),
                 })
             except Exception as e:
+                # Never pretend success: record the failure, surface the traceback
+                # for unexpected errors, and exit non-zero at the end.
+                failures.append({
+                    "league": short_name,
+                    "season": season_label,
+                    "url": url,
+                    "error": str(e),
+                })
                 print(f"  ✗ {season_label} ({url}) ERROR: {e}", file=sys.stderr)
+                if not isinstance(e, (RuntimeError, urllib.error.URLError, OSError)):
+                    traceback.print_exc()
 
         # Write league-specific combined file
         league_combined_file = data_dir / f"{league_info['dir_name']}_combined.csv"
@@ -217,10 +274,25 @@ def main():
     print(f"-> Generated master combined dataset: {len(all_matches_combined)} total matches -> {overall_file.name}")
 
     # Write summary manifest
+    summary_stats["failures"] = failures
     manifest_path = data_dir / "summary.json"
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(summary_stats, f, indent=2, ensure_ascii=False)
+    temporary_manifest = manifest_path.with_suffix(".json.tmp")
+    temporary_manifest.write_text(json.dumps(summary_stats, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary_manifest, manifest_path)
     print(f"-> Saved dataset manifest: {manifest_path.name}")
+
+    if failures:
+        print(
+            f"\n{len(failures)} season download(s) FAILED; the dataset is incomplete.",
+            file=sys.stderr,
+        )
+        for failure in failures:
+            print(
+                f"  - {failure['league']} {failure['season']}: {failure['error']}",
+                file=sys.stderr,
+            )
+        sys.exit(1)
+
     print(f"\nAll operations finished successfully! Total matches downloaded: {summary_stats['total_matches']}\n")
 
 
