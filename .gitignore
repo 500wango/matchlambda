@@ -38,6 +38,11 @@ venv/
 node_modules/
 .next/
 out/
+# Generated and rewritten by `next dev` / `next build` / `next typegen`, which
+# swap the `.next/dev/types` and `.next/types` imports back and forth. Next
+# manages its contents and documents it as gitignored:
+# https://nextjs.org/docs/app/api-reference/config/typescript
+next-env.d.ts
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
