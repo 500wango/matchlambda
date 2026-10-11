@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "build:static": "NEXT_STATIC_EXPORT=1 next build && node scripts/write-headers.cjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

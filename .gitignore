@@ -46,6 +46,9 @@ yarn-error.log*
 # Database & local data
 *.sqlite3
 postgres_data/
+# deploy/backup.sh writes dumps here by default. A database dump must never be
+# committed: it carries password hashes and every user row.
+backups/
 data/historical/
 backend/data/
 celerybeat-schedule

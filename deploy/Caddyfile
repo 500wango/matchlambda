@@ -1,0 +1,39 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Serves the API only. The frontend is a static bundle on Cloudflare Pages and
+# never reaches this host.
+#
+# Caddy obtains and renews the TLS certificate for {$DOMAIN} automatically, so
+# the payment provider's IPN callback URL can be
+# https://{$DOMAIN}/v1/payments/webhook without any manual certificate work.
+# Ports 80 and 443 must both be reachable: 80 answers the ACME HTTP-01
+# challenge and redirects everything else to HTTPS.
+{$DOMAIN} {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
+
+	# Everything the browser and the payment provider call lives under /v1.
+	# reverse_proxy stamps X-Forwarded-For with the real client address; the app
+	# trusts exactly one hop from the compose subnet (TRUSTED_PROXY_HOPS=1).
+	handle /v1/* {
+		reverse_proxy api:8000
+	}
+
+	# Used by the api container's healthcheck and by external uptime probes.
+	handle /health {
+		reverse_proxy api:8000
+	}
+
+	# /docs and /redoc are disabled (SHOW_DOCS=false in this stack) and nothing
+	# else is served here, so answer the rest with an explicit 404 instead of
+	# leaking a Caddy default page.
+	handle {
+		respond "Not Found" 404
+	}
+}

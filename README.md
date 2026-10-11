@@ -19,7 +19,8 @@ Pre-match regulation-time 1X2 across gate-approved leagues (Tier 1: EPL; Tier 2 
 | `docs/07_CRYPTO_PAYMENT_INTEGRATION.md` | Catalog, payment verification and entitlement transitions |
 | `docs/08_SPRINT_IMPLEMENTATION_PLAN.md` | Work order and acceptance gates |
 | `AI_DEV_PROMPT_GEMINI.md` | Coding-agent workflow referencing those contracts |
-| `docker-compose.yml`, `.env.example` | Service configuration |
+| `docker-compose.yml`, `.env.example` | Local service configuration |
+| `deploy/README.md`, `docker-compose.prod.yml` | Production deployment (single host + Cloudflare Pages) |
 
 ## Local setup status
 
@@ -28,4 +29,7 @@ Pre-match regulation-time 1X2 across gate-approved leagues (Tier 1: EPL; Tier 2 
 3. Start infrastructure and services: `docker compose up -d` or run backend and frontend independently for local development.
 4. Run backend tests: `pytest backend/tests/`.
 5. Build frontend: `npm --prefix frontend run build`.
+
+For production (one always-on host, TLS via Caddy, static frontend on Cloudflare
+Pages) see [`deploy/README.md`](deploy/README.md).
 
