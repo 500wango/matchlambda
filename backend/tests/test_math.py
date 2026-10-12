@@ -3,7 +3,13 @@ import math
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 from app.math.shin import calculate_shin_probabilities
-from app.math.dixon_coles import calculate_match_distribution, check_all_tau_factors, tau, fit_dixon_coles
+from app.math.dixon_coles import (
+    InsufficientTrainingDataError,
+    calculate_match_distribution,
+    check_all_tau_factors,
+    tau,
+    fit_dixon_coles,
+)
 from app.math.ev import calculate_ev, calculate_half_kelly, has_value_signal
 from app.math.metrics import brier_score_multiclass, log_loss_multiclass
 from app.math.freshness import latest_eligible_quote
@@ -85,8 +91,26 @@ def test_dixon_coles_requires_convergence_and_available_results():
     teams = ["a", "b", "c", "d"]
     for i in range(40):
         matches.append((teams[i % 4], teams[(i + 1) % 4], 1 + (i % 2), i % 2, base + timedelta(days=i), base + timedelta(days=100)))
-    with pytest.raises(ValueError, match="Not enough eligible"):
+    with pytest.raises(InsufficientTrainingDataError, match="Not enough eligible"):
         fit_dixon_coles(matches, teams, base + timedelta(days=40))
+
+
+def test_dixon_coles_reports_thin_leagues_as_insufficient_data():
+    """Too little history is an expected skip, not a defect.
+
+    hourly_pipeline catches this specific type and logs a one-line warning
+    instead of a full traceback on every tick, so it has to stay
+    distinguishable from a genuine fit failure.
+    """
+    base = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    matches = [
+        ("a", "b", 1, 0, base + timedelta(days=i), base + timedelta(days=1))
+        for i in range(3)
+    ]
+    with pytest.raises(InsufficientTrainingDataError, match="Insufficient match history"):
+        fit_dixon_coles(matches, ["a", "b"], base + timedelta(days=10))
+    # Handlers that only know ValueError must keep working.
+    assert issubclass(InsufficientTrainingDataError, ValueError)
 
 
 def test_market_baseline_uses_latest_quote_available_before_decision():

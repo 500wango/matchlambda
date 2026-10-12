@@ -7,6 +7,19 @@ from scipy.special import gammaln
 from scipy.stats import poisson
 
 
+class InsufficientTrainingDataError(ValueError):
+    """The league has too little usable history to fit Dixon-Coles.
+
+    This is an ordinary, expected state for a newly activated or sparse league,
+    and hourly training hits it on every tick until enough matches accumulate.
+    Callers that loop over leagues should skip the league quietly; every other
+    fit failure is a real defect and should still be logged with a traceback.
+
+    Subclasses ValueError so existing handlers and tests that catch ValueError
+    keep working.
+    """
+
+
 def tau(x: int, y: int, lambda_: float, mu: float, rho: float) -> float:
     """
     Dixon-Coles low-score correction factor tau(x, y).
@@ -168,7 +181,10 @@ def fit_dixon_coles(
     n_teams = len(team_list)
 
     if n_teams < 2 or len(matches) < min_matches:
-        raise ValueError("Insufficient match history or teams for Dixon-Coles fit.")
+        raise InsufficientTrainingDataError(
+            f"Insufficient match history or teams for Dixon-Coles fit "
+            f"({n_teams} teams, {len(matches)} matches, need {min_matches})."
+        )
 
     # Filter matches available by training_cutoff
     eligible_matches = []
@@ -179,7 +195,9 @@ def fit_dixon_coles(
             eligible_matches.append((team_to_idx[h], team_to_idx[a], hs, as_, weight))
 
     if len(eligible_matches) < min_matches:
-        raise ValueError(f"Not enough eligible matches before training cutoff (need {min_matches}).")
+        raise InsufficientTrainingDataError(
+            f"Not enough eligible matches before training cutoff (need {min_matches})."
+        )
 
     # Parameter vector layout:
     # [alpha_0 ... alpha_{N-1}, beta_0 ... beta_{N-1}, gamma (home_advantage), rho]

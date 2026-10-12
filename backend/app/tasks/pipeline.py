@@ -14,7 +14,11 @@ from app.core.celery import celery_app
 from app.models import League, Team, Match, OddsSnapshot, ModelParameter, Prediction
 
 logger = logging.getLogger(__name__)
-from app.math.dixon_coles import fit_dixon_coles, calculate_match_distribution
+from app.math.dixon_coles import (
+    InsufficientTrainingDataError,
+    fit_dixon_coles,
+    calculate_match_distribution,
+)
 from app.math.freshness import latest_eligible_quote
 from app.services.settings_service import (
     load_provider_config,
@@ -449,6 +453,11 @@ async def run_hourly_pipeline():
     for league in leagues:
         try:
             await train_league(league.id, refresh_predictions=True)
+        except InsufficientTrainingDataError as exc:
+            # Expected for leagues that are newly activated or still thin on
+            # history. Logged as a warning without a traceback so it does not
+            # drown the real failures in noise every hour.
+            logger.warning("Skipping training for %s: %s", league.id, exc)
         except Exception:
             logger.exception("Pipeline training failed for %s", league.id)
 
